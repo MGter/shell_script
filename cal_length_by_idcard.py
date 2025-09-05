@@ -1,5 +1,18 @@
-# pip install opencv-python numpy
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+文件名: cal_length_by_idcard.py
+功能: 身份证长度计算器
+描述: 通过身份证的对比，计算测量其他物品的长度
+注意: 
+    1. 本应用依赖Python3的opencv-python和numpy库，建议使用pip install scapy进行下载
+创建人: MGter
+创建时间: 2025年7月9日13:46:35
+最后修改时间: 2025年7月9日13:46:35
+版本: 1.0.0
+"""
 
+# pip install opencv-python numpy
 import cv2
 import numpy as np
 import math
