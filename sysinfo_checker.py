@@ -2,16 +2,20 @@ import subprocess
 import json
 import re
 import os
+import sys
 import datetime
+import shutil
+
+__DEBUG__ = True
 
 # ------------ 版本信息 ------------ 
-# 版本：        v1.0
-# 修订时间：    2025年9月24日16:27:23
+# 版本：        v1.3
+# 修订时间：    2025年10月11日11:10:22
 # 修订人：      MGter
 # 邮箱：        zxwangbuaa@gmail.com
 # 功能：        检查当前系统情况，统计表格输出到 sysinfo_checker.json 中
 # 使用方法：    python3 执行本脚本
-# 上次更新：    修改封装形式
+# 上次更新：    新增DNS解析函数
 # ------------------------------ 
 
 
@@ -30,6 +34,8 @@ check_list = [
     "check_processes_status",
     "check_all_hw_cnt",
     "check_sys_log",
+    "check_time_info",
+    "check_resolve_info",
     # 系统信息
     "check_login_info",
     "check_grub_info",
@@ -51,6 +57,11 @@ check_list = [
     "check_top10_cpu_usage_process",
     "check_top10_mem_usage_process",
     "check_2050_info",
+]
+
+
+temp_list = [
+    
 ]
 # ------------------------------ 
 
@@ -119,6 +130,101 @@ class SystemInfoChecker:
             # print(f"Error running command '{' '.join(cmd)}': {e}")
             return None
 
+    def get_service_status(self, service_name: str) -> dict:
+        """
+        获取服务状态信息
+        
+        Args:
+            service_name: 服务名称
+            
+        Returns:
+            dict: 包含服务状态信息的字典
+        """
+        dict_status = {
+            "Name": service_name,
+            "Exist": False,
+            "Status": "N/A",
+            "ActiveState": "N/A",
+            "LoadedState": "N/A",
+            "MainPid": "N/A",
+            "IsEnabled": "N/A",
+            "Error": None
+        }
+
+        try:
+            # 检查服务是否存在
+            result = self.run_command(['systemctl', 'status', service_name])
+            if not result or "could not be found" in result or "Loaded: error" in result:
+                dict_status["Exist"] = False
+                dict_status["Error"] = "Service not found"
+                return dict_status
+            
+            dict_status["Exist"] = True
+            
+            # 解析服务状态信息
+            for line in result.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                if "Active:" in line:
+                    active_state = line.split("Active:")[1].strip()
+                    dict_status["ActiveState"] = active_state
+                    
+                    # 根据Active状态设置综合状态
+                    if "active (running)" in active_state:
+                        dict_status["Status"] = "running"
+                    elif "active (exited)" in active_state:
+                        dict_status["Status"] = "exited"
+                    elif "active (waiting)" in active_state:
+                        dict_status["Status"] = "waiting"
+                    elif "inactive (dead)" in active_state:
+                        dict_status["Status"] = "stopped"
+                    elif "failed" in active_state:
+                        dict_status["Status"] = "failed"
+                    else:
+                        dict_status["Status"] = "unknown"
+                        
+                elif "Loaded:" in line:
+                    loaded_state = line.split("Loaded:")[1].strip()
+                    dict_status["LoadedState"] = loaded_state
+                    
+                    # 从Loaded状态提取启用状态
+                    if "enabled" in loaded_state:
+                        dict_status["IsEnabled"] = "enabled"
+                    elif "disabled" in loaded_state:
+                        dict_status["IsEnabled"] = "disabled"
+                    elif "static" in loaded_state:
+                        dict_status["IsEnabled"] = "static"
+                        
+                elif "Main PID:" in line:
+                    main_pid = line.split("Main PID:")[1].strip().split()[0]
+                    dict_status["MainPid"] = main_pid
+                    
+                elif "Process:" in line and dict_status["MainPid"] == "N/A":
+                    # 备选方案获取PID
+                    import re
+                    pid_match = re.search(r'PID:(\d+)', line)
+                    if pid_match:
+                        dict_status["MainPid"] = pid_match.group(1)
+            
+            # 使用 systemctl is-enabled 确认启用状态
+            enabled_result = self.run_command(['systemctl', 'is-enabled', service_name])
+            if enabled_result and enabled_result.strip() in ['enabled', 'disabled', 'static', 'masked', 'indirect']:
+                dict_status["IsEnabled"] = enabled_result.strip()
+            
+            # 如果还没有确定状态，使用 systemctl is-active 检查
+            if dict_status["Status"] == "N/A":
+                active_result = self.run_command(['systemctl', 'is-active', service_name])
+                if active_result:
+                    dict_status["Status"] = active_result.strip()
+            
+            return dict_status
+            
+        except Exception as e:
+            dict_status["Error"] = f"Unexpected error: {str(e)}"
+            return dict_status
+
     def check_timestamp(self):
         """
         生成一个当前时间戳，作为info的第一个参数
@@ -152,6 +258,76 @@ class SystemInfoChecker:
 
         self.info["Process_Cnt"] = process_list
         return all_running
+
+    def get_rpm_package_version(self, package_name):
+        """
+        使用 rpm -q 查询软件包版本信息
+        """
+        try:
+            # 使用 rpm -q --queryformat 格式化输出
+            # %{NAME} 获取软件包名称
+            # %{VERSION} 获取版本号
+            # %{RELEASE} 获取发布号
+            # %{ARCH} 获取架构
+            output = self.run_command(['rpm', '-q', '--queryformat', '%{NAME}:%{VERSION}-%{RELEASE}:%{ARCH}', package_name])
+            
+            if not output:
+                return None
+
+            parts = output.split(':')
+            if len(parts) == 3:
+                package_info = {
+                    'Package': parts[0],
+                    'Version': parts[1],
+                    'Architecture': parts[2]
+                }
+                return package_info['Version']
+            else:
+                return None
+
+        except Exception as e:
+            return None
+
+    def get_apt_package_version(self, package_name):
+        """
+        使用apt show 获得软件版本信息
+        """
+        try:
+            result = self.run_command(['apt', 'show', package_name])
+            if not result:
+                return None            
+            
+            # 解析输出
+            package_info = {}
+            
+            for line in result:
+                line = line.strip()
+                
+                # 查找Package信息
+                if line.startswith('Package:'):
+                    package_info['Package'] = line.split(':', 1)[1].strip()
+                
+                # 查找Version信息
+                elif line.startswith('Version:'):
+                    package_info['Version'] = line.split(':', 1)[1].strip()
+                
+                # 查找Status信息
+                elif line.startswith('Status:'):
+                    package_info['Status'] = line.split(':', 1)[1].strip()
+                
+                # 如果已经收集到所有需要的信息，提前退出循环
+                if len(package_info) == 3:
+                    break
+            
+            # 检查是否成功获取到所有必要信息
+            if len(package_info) == 3:
+                return package_info
+            else:
+                return None
+                
+        except Exception as e:
+            # print(f"Error getting package info for {package_name}: {e}")
+            return None
 
     def check_os_ver_info(self):
         """
@@ -240,6 +416,7 @@ class SystemInfoChecker:
             print(f"Error getting uptime info: {e}")
 
         self.info["OS_Info"] = os_info
+
 
     def check_mainboard_info(self):
         # 初始值
@@ -571,7 +748,7 @@ class SystemInfoChecker:
         try:
             command = "lspci | grep 'VGA compatible controller' | grep -i Nvidia"
             result = self.run_command(command, shell=True)
-            if result:
+            if result and "not found" not in result:
                 nvidia_info["Cnt"] = len(result.splitlines())
             else:
                 nvidia_info["Cnt"] = 0
@@ -793,7 +970,7 @@ class SystemInfoChecker:
 
         # ip addr 查询
         netcard_output = self.run_command(['ip', '-s', 'addr'])
-        if netcard_output:
+        if not netcard_output:
             self.info['Netcard_Info'] = netcard_info_list
             return False
         lines = netcard_output.splitlines()
@@ -1018,12 +1195,12 @@ class SystemInfoChecker:
             except OSError as e:
                 # 捕获权限错误或其他文件系统错误
                 print(f"Error accessing directory {suma_path}: {e}")
-                suma_software_list = ["N/A"]
+                suma_software_list = []
                 
         else:
             # 如果路径不存在，则返回一个包含"N/A"的列表，或者一个空列表
             print(f"Directory {suma_path} does not exist.")
-            suma_software_list = ["N/A"]
+            suma_software_list = []
 
         self.info["Suma_Software_Version"] = suma_software_list
 
@@ -1032,11 +1209,13 @@ class SystemInfoChecker:
         检查blackmagic卡的相关信息
         """
 
-        black_magic_info = {
-            "Cnt": int(0),
-            "Driver_Version": "N/A",
-            "Info": []  
-        }
+        # 初始化参数
+        deb_list = ['dkms', "desktopvideo", "desktopvideo-gui", "mediaexpress"]
+        black_magic_info = {}
+        black_magic_info["Cnt"] = 0
+        for deb in deb_list:
+            black_magic_info[deb] = "N/A"
+        black_magic_info['Info'] = []
 
         # check card
         try:
@@ -1063,43 +1242,25 @@ class SystemInfoChecker:
                         
                         black_magic_info["Cnt"] += 1
                         black_magic_info["Info"].append(info)
-
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             # print(f"Error running command: {e}")
             pass
+
+        # check apt or yum
+        apt_exist = shutil.which('apt') is not None
+        yum_exist = shutil.which('yum') is not None
 
         # check driver version
-        '''
-        try:
-            command = "lspci | grep -i 'blackmagic'"
-            result = subprocess.run(
-                command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                check=True
-            )
-            black_magic_info = result.stdout.strip()
+        for deb in deb_list:
+            if apt_exist:
+                deb_info = self.get_apt_package_version(deb)
+            elif yum_exist:
+                deb_info = self.get_rpm_package_version(deb)
+            else:
+                deb_info = None
+            if deb_info:
+                black_magic_info[deb]  = deb_info
 
-            if black_magic_info:
-                for line in black_magic_info.splitlines():
-                    clean_line = line.strip()
-                    parts = clean_line.split()
-                    
-                    if len(parts) > 0:
-                        info = {}
-                        info["Name"] = " ".join(parts[3:]) 
-                        info["Loc"] = parts[0]
-                        
-                        black_magic_info["Cnt"] += 1
-                        black_magic_info["Info"].append(info)
-
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            # print(f"Error running command: {e}")
-            pass
-        '''
-            
         self.info['Black_Magic_Info'] = black_magic_info
 
     def check_cron_task_info(self):
@@ -1398,11 +1559,11 @@ class SystemInfoChecker:
         for name, cmd in hardware_queries.items():
             try:
                 result = self.run_command(cmd, shell=True)
-                if not result:
-                    result = 0
-                else:
+                if result and "not found" not in result:
                     count = int(result)
                     hw_counts[name] = count
+                else:
+                    result = 0
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 hw_counts[name] = 0
 
@@ -1429,8 +1590,6 @@ class SystemInfoChecker:
             self.info["Sysinfo"] = sysinfo
             print("System log file not found at /var/log/syslog or /var/log/messages.")
             return False
-
-
 
         # 过滤并统计日志
         for key, pattern in default_keys.items():
@@ -1473,6 +1632,156 @@ class SystemInfoChecker:
     def check_dmesg_info(self) -> bool:
         pass
 
+    def check_time_info(self) -> bool:
+        '''
+        从systemd-timedatectl中获取处理
+        '''
+
+        Time_Info = {}
+        Time_Info["Local_Time"] = "N/A"
+        Time_Info["Universal_Time"] = "N/A"
+        Time_Info["RTC_Time"] = "N/A"
+        Time_Info["Time_Zone"] = "N/A"
+        Time_Info["System_Clock_Synchronized"] = "N/A"
+        Time_Info["Timesyncd_Status"] = "N/A"
+        Time_Info["Active_NTP_Service"] = "N/A"
+        Time_Info["RTC_In_Local_TZ"] = "N/A"
+
+        timedatectl_output = self.run_command(['timedatectl', 'status'])
+        if not timedatectl_output:
+            self.info["Time_Info"] = Time_Info
+            print("Failed to run command timedatectl")
+            return False
+        
+        # Parse the output line by line
+        try:
+            for line in timedatectl_output.splitlines():
+                line = line.strip()
+                if line.startswith("Local time:"):
+                    Time_Info["Local_Time"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Universal time:"):
+                    Time_Info["Universal_Time"] = line.split(":", 1)[1].strip()
+                elif line.startswith("RTC time:"):
+                    Time_Info["RTC_Time"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Time zone:"):
+                    Time_Info["Time_Zone"] = line.split(":", 1)[1].strip()
+                elif line.startswith("System clock synchronized:"):
+                    Time_Info["System_Clock_Synchronized"] = line.split(":", 1)[1].strip()
+                elif line.startswith("NTP service:"):
+                    Time_Info["Timesyncd_Status"] = line.split(":", 1)[1].strip()
+                elif line.startswith("RTC in local TZ:"):
+                    Time_Info["RTC_In_Local_TZ"] = line.split(":", 1)[1].strip()
+
+            # 查询其它的ntp服务
+            ntp_services = ['systemd-timesyncd', 'chronyd', 'ntpd', 'ntp']
+            active_services = []
+            for service in ntp_services:
+                try:
+                    service_status = self.run_command(['systemctl', 'is-active', service])
+                    if service_status and service_status.strip() == 'active':
+                        active_services.append(service)
+                except Exception as e:
+                    print(f"Error checking service {service}: {e}")
+                    continue
+            
+            if active_services:
+                Time_Info["Active_NTP_Service"] = ", ".join(active_services)
+            else:
+                Time_Info["Active_NTP_Service"] = "N/A"
+
+
+            self.info["Time_Info"] = Time_Info
+            return True
+
+        except Exception as e:
+            print(f"Error parsing timedatectl output: {e}")
+            self.info["Time_Info"] = Time_Info
+            return False
+    
+    def check_resolve_info(self) -> bool:
+        '''
+        读取/etc/resolv.conf
+        '''
+        
+        # 参数
+        resolv_info = {
+            "Conf_Status": "N/A",
+            "NameServers": [],
+            "SearchDomains": [],
+            "Options": [],
+            "Service_Info": {},
+            "Error": "N/A"
+        }
+        conf_name = "/etc/resolv.conf"
+        
+        # 检查文件是否存在
+        if not os.path.exists(conf_name):
+            resolv_info["Conf_Status"] = "not_exists"
+            resolv_info["Error"] = f"File {conf_name} does not exist"
+            self.info["Resolv_Info"] = resolv_info
+            return False
+
+        # 检查文件是否可读
+        if not os.access(conf_name, os.R_OK):
+            resolv_info["Conf_Status"] = "no_permission"
+            resolv_info["Error"] = f"No read permission for {conf_name}"
+            self.info["Resolv_Info"] = resolv_info
+            return False
+        
+        # 读取文件内容
+        with open(conf_name, 'r') as f:
+            content = f.read().strip()
+        if not content:
+            resolv_info["Conf_Status"] = "empty"
+            self.info["Resolv_Info"] = resolv_info
+            return False
+        
+        resolv_info["Conf_Status"] = "exists"
+        # 解析DNS配置信息
+        for line in content.split('\n'):
+            line = line.strip()
+            
+            # 跳过空行和注释
+            if not line or line.startswith('#'):
+                continue
+            
+            # 解析nameserver
+            if line.startswith('nameserver'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    dns_server = parts[1].strip()
+                    if dns_server not in resolv_info["NameServers"]:
+                        resolv_info["NameServers"].append(dns_server)
+            
+            # 解析search domain
+            elif line.startswith('search'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    domains = parts[1:]
+                    resolv_info["SearchDomains"].extend(domains)
+            
+            # 解析domain
+            elif line.startswith('domain'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    domain = parts[1].strip()
+                    if domain not in resolv_info["SearchDomains"]:
+                        resolv_info["SearchDomains"].append(domain)
+            
+            # 解析options
+            elif line.startswith('options'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    options = parts[1:]
+                    resolv_info["Options"].extend(options)
+    
+        # 检查systemd-resolvd服务是否启动
+        resolv_info["Service_Info"] = self.get_service_status("systemd-resolved")
+
+        # 写入info
+        self.info["Resolv_Info"] = resolv_info
+
+
     # 检查2050的参数, todo
     def check_2050_info(self) -> bool:
         xStream2050_info = {}
@@ -1480,7 +1789,11 @@ class SystemInfoChecker:
         xStream2050_info["MediaTransforms"] = []
 
     def save_to_file(self):
-        self.generate_filename()
+        if(__DEBUG__):
+            pass
+        else:
+            self.generate_filename()
+        
         with open(self.output_file, 'w') as f:
             json.dump(self.info, f, indent=4)
 
@@ -1514,13 +1827,17 @@ class SystemInfoChecker:
 # ------------------------------
 
 # ------------ 主函数 ------------ 
-def main():
+def main(param_list: list):
     checker = SystemInfoChecker()
-    checker.execute_checks_from_dict(check_list)
+    if param_list:
+        print(param_list)
+    else:
+        checker.execute_checks_from_dict(check_list)
 # ------------------------------
 
 
 # ------------ 脚本入口 ------------ 
 if __name__ == "__main__":
-    main()
+    param_list = sys.argv[1:]
+    main(param_list)
 # ------------------------------
