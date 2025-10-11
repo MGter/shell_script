@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 文件名: pcap_udp_extractor.py
-功能: 
-描述: 提取pcap文件中的udp负载
+功能: 提取pcap文件中的udp负载
+使用方式：python3 pcap_udp_extractor.py input.pcap output.ts
 注意: 
     1. 本应用依赖Python3的scapy库，建议使用pip install scapy进行下载
 创建人: MGter
@@ -20,6 +20,16 @@ from pathlib import Path
 from typing import List
 from scapy.all import *
 from scapy.layers.inet import UDP
+
+def print_help():
+    """打印帮助信息"""
+    print("用法: python script.py <输入文件> <输出文件>")
+    print("功能: 从输入文件中提取UDP负载并保存到输出文件")
+    print("参数:")
+    print("  <输入文件>  要处理的输入文件路径")
+    print("  <输出文件>  保存提取结果的输出文件路径")
+    print("示例:")
+    print("  python3 script.py input.pcap output.ts")
 
 def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
     """
@@ -45,14 +55,23 @@ def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
 
 
 def main():
+    # 检查参数数量
+    if len(sys.argv) < 3:
+        print("[错误] 参数数量不正确")
+        print_help()
+        return
+    
     input_file = sys.argv[1]
+    output_file = sys.argv[2]
+
+    # 检查输入文件是否存在
     if not os.path.exists(input_file):
         print(f"[错误] 输入文件 {input_file} 不存在")
+        print_help()
         return
-    output_file = sys.argv[2]
-    output_file = "output.ts"
+    
     extract_udp_payload(input_file, output_file)
-    print("[完成] 提取UDP负载完成")
+    print(f"[完成] UDP负载提取完成，结果保存在 {output_file}")
 
 
 if __name__ == "__main__":
