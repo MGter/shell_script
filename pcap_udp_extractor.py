@@ -8,8 +8,8 @@
     1. 本应用依赖Python3的scapy库，建议使用pip install scapy进行下载
 创建人: MGter
 创建时间: 2025年7月9日13:46:35
-最后修改时间: 2025年10月11日10:51:15
-版本: 1.0.1
+最后修改时间: 2025年11月24日11:30:50
+版本: 1.2.1
 """
 
 # pip install scapy
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List
 from scapy.all import *
 from scapy.layers.inet import UDP
+from scapy.utils import PcapReader
 
 def print_help():
     """打印帮助信息"""
@@ -31,13 +32,14 @@ def print_help():
     print("示例:")
     print("  python3 script.py input.pcap output.ts")
 
+'''
 def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
-    """
+    # """
     从PCAP文件中提取UDP负载
     :param input_pcap: 输入的PCAP文件
     :param output_file: 输出的TS文件
     :return: 执行结果
-    """
+    #"""
     try:
         packets = rdpcap(input_pcap)
         with open(output_file, 'wb') as f:
@@ -51,6 +53,33 @@ def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
     
     except Exception as e:
         print(f"[错误] 处理 {input_pcap} 时出错: {e}")
+        return False
+'''
+
+def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
+    try:
+        count_udp = 0
+        count_total = 0
+
+        print(f"[信息] 开始流式读取 {input_pcap} ...")
+
+        with PcapReader(input_pcap) as pcap, open(output_file, 'wb') as f:
+            for pkt in pcap:
+                count_total += 1
+                if UDP in pkt:
+                    f.write(bytes(pkt[UDP].payload))
+                    count_udp += 1
+
+                if count_total % 10000 == 0:
+                    print(f"已处理 {count_total} 个包，UDP 包 {count_udp}", end='\r')
+
+        print()
+        print(f"[完成] 共处理 {count_total} 个包，UDP 包 {count_udp}")
+        print(f"[输出文件] {output_file}")
+        return True
+
+    except Exception as e:
+        print(f"[错误] {e}")
         return False
 
 
