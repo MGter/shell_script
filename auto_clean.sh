@@ -49,7 +49,8 @@ main() {
         # 判断是否需要清理
         if (( count > MAX_FILES )); then
             # 按修改时间升序排列，取第一个（最旧）
-            oldest_file=$(echo "$files" | sort -r -t. -k1,1 -k2,2 -k3,3 | tail -n1)
+            # oldest_file=$(echo "$files" | sort -r -t. -k1,1 -k2,2 -k3,3 | tail -n1)
+            oldest_file=$(ls -tr | head -n 1)
 
             if [[ -n "$oldest_file" ]]; then
                 log "⚠️ 超过 $MAX_FILES 个文件（共 $count 个），删除最旧文件：$oldest_file"
