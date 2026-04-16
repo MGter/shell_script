@@ -1,36 +1,58 @@
 #!/bin/bash
 
-# version 1.1
-# 修改日期：2025年9月18日09:24:34
-# 功能：从文件中提取 xStreamTool_MemWatch.py 生成的内存统计数据部分，合成一个csv文件辅助查看趋势
-# 使用方法： sh memwatch_striper.sh [file]
-# 创建人：MGter
+# 内存监控数据提取工具
+# 从 xStreamTool_MemWatch 日志提取数据转为CSV
 
-SRC_FILE=$1
-TEMP_FILE="${SRC_FILE}.temp"
-DST_FILE="${SRC_FILE}.csv"
+show_help() {
+    echo "用法: $0 [-i <输入文件>] [-o <输出文件>] [-h]"
+    echo ""
+    echo "选项:"
+    echo "  -i <文件>  输入日志文件"
+    echo "  -o <文件>  输出CSV文件 (默认: 输入文件名.csv)"
+    echo "  -h         显示帮助"
+    echo ""
+    echo "示例:"
+    echo "  $0 -i memwatch.log"
+    echo "  $0 -i memwatch.log -o result.csv"
+}
 
-# 检查源文件是否存在
-if [ ! -f "$SRC_FILE" ]; then
-    echo "错误：源文件 '$SRC_FILE' 不存在。"
-    echo "使用方法： sh memwatch_striper.sh [file]"
-    exit 1
-fi
+INPUT_FILE=""
+OUTPUT_FILE=""
 
-echo "开始处理文件 '$SRC_FILE'..."
+# 无参数时显示帮助
+[ $# -eq 0 ] && { show_help; exit 0; }
 
-# 1. 提取包含 "xStreamTool_MemWatch" 的内容
-echo "提取包含 "xStreamTool_MemWatch" 的内容" 
-grep "xStreamTool_MemWatch" "$SRC_FILE" | grep -v "CRON" > "$TEMP_FILE"
-grep -o '{.*}' $TEMP_FILE >  "{$TEMP_FILE}.1"
+while getopts "i:o:h" opt; do
+    case $opt in
+        i) INPUT_FILE="$OPTARG" ;;
+        o) OUTPUT_FILE="$OPTARG" ;;
+        h) show_help; exit 0 ;;
+        ?) show_help; exit 1 ;;
+    esac
+done
 
-# 2. 将所有标点符号和空格都替换为逗号，并清除多余的逗号
-echo "文件格式转换中，目标文件：$DST_FILE"
-sed 's/[[:punct:] ]/,/g' "{$TEMP_FILE}.1" | sed 's/, */,/g' > "{$TEMP_FILE}.2"
-sed -E 's/,+/,/g' "{$TEMP_FILE}.2" > $DST_FILE
+# 检查参数
+[ -z "$INPUT_FILE" ] && { echo "错误: 缺少输入文件"; show_help; exit 1; }
 
-# 4. 清理中间的临时文件
-echo "正在清理中间文件"
-rm -f "$TEMP_FILE" "{$TEMP_FILE}.1" "{$TEMP_FILE}.2"
+# 检查文件存在
+[ ! -f "$INPUT_FILE" ] && { echo "错误: 文件不存在 $INPUT_FILE"; exit 1; }
 
-echo "处理完成，结果已保存到 '$DST_FILE'。"
+# 设置默认输出文件
+[ -z "$OUTPUT_FILE" ] && OUTPUT_FILE="${INPUT_FILE}.csv"
+
+TEMP_FILE="${INPUT_FILE}.temp"
+
+echo "[处理] $INPUT_FILE -> $OUTPUT_FILE"
+
+# 提取数据
+grep "xStreamTool_MemWatch" "$INPUT_FILE" | grep -v "CRON" > "$TEMP_FILE"
+grep -o '{.*}' "$TEMP_FILE" > "${TEMP_FILE}.1"
+
+# 格式转换
+sed 's/[[:punct:] ]/,/g' "${TEMP_FILE}.1" | sed 's/, */,/g' > "${TEMP_FILE}.2"
+sed -E 's/,+/,/g' "${TEMP_FILE}.2" > "$OUTPUT_FILE"
+
+# 清理
+rm -f "$TEMP_FILE" "${TEMP_FILE}.1" "${TEMP_FILE}.2"
+
+echo "[完成] $OUTPUT_FILE"

@@ -1,69 +1,46 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-文件名: pcap_udp_extractor.py
-功能: 提取pcap文件中的udp负载
-使用方式：python3 pcap_udp_extractor.py input.pcap output.ts
-注意: 
-    1. 本应用依赖Python3的scapy库，建议使用pip install scapy进行下载
-创建人: MGter
-创建时间: 2025年7月9日13:46:35
-最后修改时间: 2025年11月24日11:30:50
-版本: 1.2.1
+PCAP UDP负载提取工具 - 从PCAP文件提取UDP负载保存为TS
+依赖: pip install scapy
 """
-
-# pip install scapy
 
 import os
 import sys
-from pathlib import Path
-from typing import List
-from scapy.all import *
-from scapy.layers.inet import UDP
-from scapy.utils import PcapReader
 
-def print_help():
-    """打印帮助信息"""
-    print("用法: python script.py <输入文件> <输出文件>")
-    print("功能: 从输入文件中提取UDP负载并保存到输出文件")
-    print("参数:")
-    print("  <输入文件>  要处理的输入文件路径")
-    print("  <输出文件>  保存提取结果的输出文件路径")
-    print("示例:")
-    print("  python3 script.py input.pcap output.ts")
+def show_help():
+    print("""
+用法: python3 pcap_udp_extractor.py [-i <输入>] [-o <输出>] [-h]
 
-'''
-def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
-    # """
-    从PCAP文件中提取UDP负载
-    :param input_pcap: 输入的PCAP文件
-    :param output_file: 输出的TS文件
-    :return: 执行结果
-    #"""
+选项:
+  -i <文件>  输入PCAP文件
+  -o <文件>  输出文件 (默认: output.ts)
+  -h         显示帮助
+
+示例:
+  python3 pcap_udp_extractor.py -i test.pcap -o output.ts
+  python3 pcap_udp_extractor.py -i capture.pcap
+""")
+
+def extract_udp_payload(input_file, output_file):
+    """提取UDP负载"""
     try:
-        packets = rdpcap(input_pcap)
-        with open(output_file, 'wb') as f:
-            for pkt in packets:
-                if pkt.haslayer(UDP):
-                    payload = bytes(pkt[UDP].payload)
-                    f.write(payload)
-        
-        print(f"[提取UDP] 成功从 {input_pcap} 提取负载到 {output_file}")
-        return True
-    
-    except Exception as e:
-        print(f"[错误] 处理 {input_pcap} 时出错: {e}")
+        from scapy.utils import PcapReader
+        from scapy.layers.inet import UDP
+    except ImportError:
+        print("[错误] 缺少scapy库，请执行: pip install scapy")
         return False
-'''
 
-def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
+    if not os.path.exists(input_file):
+        print(f"[错误] 文件不存在: {input_file}")
+        return False
+
+    count_udp = 0
+    count_total = 0
+
+    print(f"[读取] {input_file}")
+
     try:
-        count_udp = 0
-        count_total = 0
-
-        print(f"[信息] 开始流式读取 {input_pcap} ...")
-
-        with PcapReader(input_pcap) as pcap, open(output_file, 'wb') as f:
+        with PcapReader(input_file) as pcap, open(output_file, 'wb') as f:
             for pkt in pcap:
                 count_total += 1
                 if UDP in pkt:
@@ -71,37 +48,27 @@ def extract_udp_payload(input_pcap: str, output_file: str) -> bool:
                     count_udp += 1
 
                 if count_total % 10000 == 0:
-                    print(f"已处理 {count_total} 个包，UDP 包 {count_udp}", end='\r')
+                    print(f"  已处理 {count_total} 包, UDP {count_udp}", end='\r')
 
         print()
-        print(f"[完成] 共处理 {count_total} 个包，UDP 包 {count_udp}")
-        print(f"[输出文件] {output_file}")
+        print(f"[完成] 总包: {count_total}, UDP: {count_udp}")
+        print(f"[输出] {output_file}")
         return True
 
     except Exception as e:
         print(f"[错误] {e}")
         return False
 
-
-def main():
-    # 检查参数数量
-    if len(sys.argv) < 3:
-        print("[错误] 参数数量不正确")
-        print_help()
-        return
-    
-    input_file = sys.argv[1]
-    output_file = sys.argv[2]
-
-    # 检查输入文件是否存在
-    if not os.path.exists(input_file):
-        print(f"[错误] 输入文件 {input_file} 不存在")
-        print_help()
-        return
-    
-    extract_udp_payload(input_file, output_file)
-    print(f"[完成] UDP负载提取完成，结果保存在 {output_file}")
-
-
 if __name__ == "__main__":
-    main()
+    # 无参数或帮助模式
+    if len(sys.argv) == 1 or '-h' in sys.argv:
+        show_help()
+        sys.exit(0)
+
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('-i', dest='input', required=True)
+    parser.add_argument('-o', dest='output', default='output.ts')
+
+    args = parser.parse_args()
+    extract_udp_payload(args.input, args.output)
