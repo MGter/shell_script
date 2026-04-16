@@ -158,9 +158,9 @@ if not os.path.exists(args.input):
 
 | 脚本 | 参数 | 类型 | 说明 |
 |------|------|------|------|
-| `link_file.sh` | `-d <目录>` | directory | 输入: 工作目录 |
+| `so_link.sh` | `-d <目录>` | directory | 输入: 工作目录 |
 | | `-h` | flag | 显示帮助 |
-| `update_file.sh` | `-i <源目录>` | directory | 输入: 配置文件源目录 |
+| `config_update.sh` | `-i <源目录>` | directory | 输入: 配置文件源目录 |
 | | `-d <目标目录>` | directory | 输出: 配置文件目标目录 |
 | | `-h` | flag | 显示帮助 |
 
@@ -168,7 +168,7 @@ if not os.path.exists(args.input):
 
 | 脚本 | 参数 | 类型 | 说明 |
 |------|------|------|------|
-| `ff_push.sh` | `-f <文件>` | filepath(.ts) | 输入: TS流文件 |
+| `ffmpeg_push.sh` | `-f <文件>` | filepath(.ts) | 输入: TS流文件 |
 | | `-i <IP>` | ipv4 | 目标: 推流IP地址 |
 | | `-p <端口>` | port | 目标: 推流起始端口 |
 | | `-n <次数>` | integer | 推流数量(端口递增) |
@@ -187,7 +187,7 @@ if not os.path.exists(args.input):
 | | `-t <间隔>` | float | 循环间隔(秒) |
 | | `--preserve-timing` | flag | 保留原始时序 |
 | | `-h` | flag | 显示帮助 |
-| `pcap_udp_extractor.py` | `-i <文件>` | filepath(.pcap) | 输入: PCAP文件 |
+| `pcap_extractor.py` | `-i <文件>` | filepath(.pcap) | 输入: PCAP文件 |
 | | `-o <文件>` | filepath(.ts) | 输出: 提取的TS文件 |
 | | `-h` | flag | 显示帮助 |
 | `udp_sender.py` | `-f <文件>` | filepath(.ts) | 输入: TS流文件 |
@@ -205,7 +205,7 @@ if not os.path.exists(args.input):
 | | `-n <数量>` | integer | 最大文件数 |
 | | `-t <间隔>` | integer | 检查间隔(秒) |
 | | `-h` | flag | 显示帮助 |
-| `memwatch_striper.sh` | `-i <文件>` | filepath(.log) | 输入: 内存监控日志 |
+| `memwatch_parser.sh` | `-i <文件>` | filepath(.log) | 输入: 内存监控日志 |
 | | `-o <文件>` | filepath(.csv) | 输出: 转换后的CSV |
 | | `-h` | flag | 显示帮助 |
 | `sysinfo_checker.py` | `-o <文件>` | filepath(.json) | 输出: 检查结果JSON |
@@ -216,7 +216,7 @@ if not os.path.exists(args.input):
 
 | 脚本 | 参数 | 类型 | 说明 |
 |------|------|------|------|
-| `cal_length_by_idcard.py` | `-i <文件>` | filepath(.jpg/.png) | 输入: 待测量图像 |
+| `image_measurer.py` | `-i <文件>` | filepath(.jpg/.png) | 输入: 待测量图像 |
 | | `-o <文件>` | filepath(.jpg) | 输出: 标记结果图像 |
 | | `-h` | flag | 显示帮助 |
 
