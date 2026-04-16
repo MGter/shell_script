@@ -16,8 +16,6 @@ import time
 import argparse
 import subprocess
 from pathlib import Path
-from scapy.all import rdpcap
-from scapy.layers.inet import UDP
 
 def show_help():
     """显示帮助信息"""
@@ -25,17 +23,25 @@ def show_help():
 用法: python3 multi_cap_parser.py [-i <IP>] [-p <端口>] [-d <时长>] [-t <任务名>] [-o <目录>] [-h]
 
 选项:
-  -i <IP>       目标IP地址
-  -p <端口>     目标端口列表，逗号分隔 (例: 30000,30001,30002)
-  -d <时长>     抓包持续时间，秒 (默认: 10)
-  -t <任务名>   任务名称 (默认: task00)
-  -o <目录>     输出目录 (默认: ./captures)
-  -h            显示帮助
+  -i <IP>       目标: 抓包目标IP地址 (必选)
+  -p <端口>     目标: 抓包端口列表，逗号分隔 (必选)
+  -d <时长>     配置: 抓包持续时间秒数 (默认: 10)
+  -t <任务名>   配置: 任务名称 (默认: task00)
+  -o <目录>     输出: 结果保存目录 (默认: ./captures)
+  -h            显示帮助信息
 
 示例:
   python3 multi_cap_parser.py -i 192.165.58.221 -p 30000,30001,30002 -d 15
   python3 multi_cap_parser.py -i 127.0.0.1 -p 5000 -d 5 -t mytest
 """)
+
+# 无参数或帮助模式时先显示帮助
+if len(sys.argv) == 1 or '-h' in sys.argv:
+    show_help()
+    sys.exit(0)
+
+from scapy.all import rdpcap
+from scapy.layers.inet import UDP
 
 def capture(duration: int, ip: str, port: int, output: str) -> bool:
     """执行网络抓包"""
@@ -124,33 +130,23 @@ def main(ip: str, ports: list, duration: int, task_name: str, save_path: str):
     print(f"\n[完成] 处理 {len(pcap_list)} 个端口")
 
 if __name__ == "__main__":
-    # 无参数时显示帮助
-    if len(sys.argv) == 1:
-        show_help()
-        sys.exit(0)
-
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-i', dest='ip', required=True)
     parser.add_argument('-p', dest='ports', required=True)
     parser.add_argument('-d', dest='duration', type=int, default=10)
     parser.add_argument('-t', dest='task', default='task00')
     parser.add_argument('-o', dest='output', default='./captures')
-    parser.add_argument('-h', dest='help', action='store_true')
 
     args = parser.parse_args()
-
-    if args.help:
-        show_help()
-        sys.exit(0)
 
     # 解析端口列表
     ports = [int(p.strip()) for p in args.ports.split(',')]
 
     print(f"[配置]")
-    print(f"  IP: {args.ip}")
-    print(f"  端口: {ports}")
-    print(f"  时长: {args.duration}秒")
-    print(f"  任务: {args.task}")
-    print(f"  输出: {args.output}")
+    print(f"  目标IP: {args.ip}")
+    print(f"  目标端口: {ports}")
+    print(f"  抓包时长: {args.duration}秒")
+    print(f"  任务名称: {args.task}")
+    print(f"  输出目录: {args.output}")
 
     main(args.ip, ports, args.duration, args.task, args.output)

@@ -13,13 +13,13 @@ def show_help():
 用法: python3 pcap_sender.py [-f <文件>] [-i <IP>] [-p <端口>] [-n <次数>] [-t <间隔>] [--preserve-timing] [-h]
 
 选项:
-  -f <文件>          PCAP文件路径
-  -i <IP>            目标IP地址
-  -p <端口>          目标端口
-  -n <次数>          循环次数，-1为无限 (默认: 1)
-  -t <间隔>          循环间隔秒数 (默认: 1.0)
-  --preserve-timing  保留原始包时序
-  -h                 显示帮助
+  -f <文件>          输入: PCAP文件路径 (必选)
+  -i <IP>            目标: 发送IP地址 (必选)
+  -p <端口>          目标: 发送端口 (必选)
+  -n <次数>          配置: 循环次数，-1为无限 (默认: 1)
+  -t <间隔>          配置: 循环间隔秒数 (默认: 1.0)
+  --preserve-timing  配置: 保留原始包时序
+  -h                 显示帮助信息
 
 示例:
   python3 pcap_sender.py -f test.pcap -i 192.165.56.184 -p 13000

@@ -12,9 +12,9 @@ def show_help():
 用法: python3 sysinfo_checker.py [-o <输出文件>] [--items <项目>] [-h]
 
 选项:
-  -o <文件>      输出JSON文件 (默认: sysinfo_checker.json)
-  --items <列表>  检查项目，逗号分隔 (默认: 全部)
-  -h             显示帮助
+  -o <文件>      输出: 检查结果JSON文件 (默认: sysinfo_checker.json)
+  --items <列表>  配置: 检查项目，逗号分隔 (默认: 全部)
+  -h             显示帮助信息
 
 检查项目:
   os, mainboard, cpu, mem, disk, netcard, gpu, software, process, log

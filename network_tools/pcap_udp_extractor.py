@@ -12,9 +12,9 @@ def show_help():
 用法: python3 pcap_udp_extractor.py [-i <输入>] [-o <输出>] [-h]
 
 选项:
-  -i <文件>  输入PCAP文件
-  -o <文件>  输出文件 (默认: output.ts)
-  -h         显示帮助
+  -i <文件>  输入: PCAP文件路径 (必选)
+  -o <文件>  输出: 提取的TS文件路径 (默认: output.ts)
+  -h         显示帮助信息
 
 示例:
   python3 pcap_udp_extractor.py -i test.pcap -o output.ts

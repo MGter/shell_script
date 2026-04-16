@@ -12,9 +12,9 @@ def show_help():
 用法: python3 cal_length_by_idcard.py [-i <图像>] [-o <输出>] [-h]
 
 选项:
-  -i <文件>   输入图像文件
-  -o <文件>   输出结果图像 (默认: measurement_result.jpg)
-  -h          显示帮助
+  -i <文件>   输入: 待测量的图像文件 (必选)
+  -o <文件>   输出: 标记结果图像路径 (默认: measurement_result.jpg)
+  -h          显示帮助信息
 
 操作说明:
   1. 先点击身份证两端(宽度85.6mm作为参考)
