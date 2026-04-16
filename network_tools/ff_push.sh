@@ -1,65 +1,118 @@
 #!/bin/bash
 
-# 检查参数数量是否正确
-if [ $# -ne 4 ]; then
-    echo "用法错误！正确用法：$0 <file> <ip> <port> <times>"
-    echo "示例：$0 input.ts 127.0.0.1 30000 5"
-    echo "说明：以上示例会执行5次命令，端口依次为30000、30001、30002、30003、30004"
+# ffmpeg多端口UDP推流工具
+
+PID_FILE="./ff_push.pid"
+
+show_help() {
+    echo "用法: $0 [-f <文件>] [-i <IP>] [-p <端口>] [-n <次数>] [-s] [-h]"
+    echo ""
+    echo "选项:"
+    echo "  -f <文件>   输入TS文件"
+    echo "  -i <IP>     目标IP地址"
+    echo "  -p <端口>   起始端口"
+    echo "  -n <次数>   推流数量 (端口递增)"
+    echo "  -s          停止所有推流进程"
+    echo "  -h          显示帮助"
+    echo ""
+    echo "示例:"
+    echo "  $0 -f input.ts -i 127.0.0.1 -p 30000 -n 5"
+    echo "  $0 -s                    # 停止所有推流"
+}
+
+stop_push() {
+    if [ -f "$PID_FILE" ]; then
+        echo "正在停止推流进程..."
+        while read pid; do
+            if kill -0 "$pid" 2>/dev/null; then
+                kill "$pid"
+                echo "已停止进程: $pid"
+            fi
+        done < "$PID_FILE"
+        rm -f "$PID_FILE"
+        echo "所有推流已停止"
+    else
+        echo "未找到PID文件，无推流进程记录"
+        echo "可手动执行: ps -ef | grep ffmpeg"
+    fi
+}
+
+# 无参数时显示帮助
+[ $# -eq 0 ] && { show_help; exit 0; }
+
+INPUT_FILE=""
+TARGET_IP=""
+START_PORT=""
+EXEC_TIMES=""
+ACTION="start"
+
+while getopts "f:i:p:n:sh" opt; do
+    case $opt in
+        f) INPUT_FILE="$OPTARG" ;;
+        i) TARGET_IP="$OPTARG" ;;
+        p) START_PORT="$OPTARG" ;;
+        n) EXEC_TIMES="$OPTARG" ;;
+        s) ACTION="stop" ;;
+        h) show_help; exit 0 ;;
+        ?) show_help; exit 1 ;;
+    esac
+done
+
+# 停止模式
+if [ "$ACTION" = "stop" ]; then
+    stop_push
+    exit 0
+fi
+
+# 启动模式：检查参数
+if [ -z "$INPUT_FILE" ] || [ -z "$TARGET_IP" ] || [ -z "$START_PORT" ] || [ -z "$EXEC_TIMES" ]; then
+    echo "错误: 缺少必要参数"
+    show_help
     exit 1
 fi
 
-# 给参数赋值，提高可读性
-INPUT_FILE=$1
-TARGET_IP=$2
-START_PORT=$3
-EXEC_TIMES=$4
-
-# 检查输入文件是否存在
+# 检查输入文件
 if [ ! -f "$INPUT_FILE" ]; then
-    echo "错误：文件 $INPUT_FILE 不存在！"
+    echo "错误: 文件 $INPUT_FILE 不存在"
     exit 1
 fi
 
-# 检查 ffmpeg 是否安装
+# 检查 ffmpeg
 if ! command -v ffmpeg &> /dev/null; then
-    echo "错误：未找到 ffmpeg，请先安装 ffmpeg！"
+    echo "错误: 未找到 ffmpeg"
     exit 1
 fi
 
-# 检查参数是否为数字（端口和执行次数）
-if ! [[ "$START_PORT" =~ ^[0-9]+$ && "$EXEC_TIMES" =~ ^[0-9]+$ ]]; then
-    echo "错误：port 和 times 必须是正整数！"
+# 检查端口和次数是否为数字
+if ! [[ "$START_PORT" =~ ^[0-9]+$ ]]; then
+    echo "错误: 端口必须是正整数"
+    exit 1
+fi
+if ! [[ "$EXEC_TIMES" =~ ^[0-9]+$ ]] || [ "$EXEC_TIMES" -le 0 ]; then
+    echo "错误: 次数必须是大于0的正整数"
     exit 1
 fi
 
-# 检查执行次数是否大于0
-if [ "$EXEC_TIMES" -le 0 ]; then
-    echo "错误：执行次数 times 必须大于0！"
-    exit 1
-fi
+# 清理旧的PID文件
+rm -f "$PID_FILE"
 
-# 循环执行指定次数的ffmpeg命令
+echo "开始推流..."
+echo "文件: $INPUT_FILE"
+echo "目标: $TARGET_IP"
+echo "端口: $START_PORT - $((START_PORT + EXEC_TIMES - 1))"
+echo "数量: $EXEC_TIMES"
+echo "----------------------------------------"
+
 current_port=$START_PORT
-echo "开始执行 $EXEC_TIMES 次 ffmpeg 后台推流命令..."
 for ((i=1; i<=EXEC_TIMES; i++)); do
-    # 拼接完整命令
-    cmd="nohup ffmpeg -stream_loop -1 -re -i $INPUT_FILE -c copy -f mpegts -pkt_size 1316 udp://$TARGET_IP:$current_port &"
-    
-    # 打印并执行命令
-    echo "执行第 $i 次命令：$cmd"
-    eval $cmd
-    
-    # 记录进程ID，方便后续管理
+    nohup ffmpeg -stream_loop -1 -re -i "$INPUT_FILE" -c copy -f mpegts -pkt_size 1316 "udp://$TARGET_IP:$current_port" &>/dev/null &
     pid=$!
-    echo "第 $i 次命令的进程ID：$pid，监听端口：$current_port"
-    
-    # 端口自增1
+    echo "$pid" >> "$PID_FILE"
+    echo "[$i] PID: $pid, 端口: $current_port"
     current_port=$((current_port + 1))
-    
-    # 短暂延迟，避免命令执行过快导致异常（可选，可根据需要调整）
     sleep 0.5
 done
 
-echo "所有命令已提交执行！"
-echo "可使用 ps -ef | grep ffmpeg 查看运行的进程"
-echo "可使用 kill -9 <进程ID> 停止指定的推流进程"
+echo "----------------------------------------"
+echo "推流完成，PID已保存到: $PID_FILE"
+echo "停止推流: $0 -s"
