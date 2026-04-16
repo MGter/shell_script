@@ -40,8 +40,29 @@ if len(sys.argv) == 1 or '-h' in sys.argv:
     show_help()
     sys.exit(0)
 
-from scapy.all import rdpcap
-from scapy.layers.inet import UDP
+# 先解析参数
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('-i', dest='ip', required=True)
+parser.add_argument('-p', dest='ports', required=True)
+parser.add_argument('-d', dest='duration', type=int, default=10)
+parser.add_argument('-t', dest='task', default='task00')
+parser.add_argument('-o', dest='output', default='./captures')
+
+try:
+    args = parser.parse_args()
+except SystemExit:
+    # argparse 检查必选参数失败时会抛出 SystemExit
+    print("\n提示: -i 和 -p 是必选参数")
+    show_help()
+    sys.exit(1)
+
+# 参数解析成功后，再导入依赖
+try:
+    from scapy.all import rdpcap
+    from scapy.layers.inet import UDP
+except ImportError:
+    print("[错误] 缺少scapy库，请执行: pip install scapy")
+    sys.exit(1)
 
 def capture(duration: int, ip: str, port: int, output: str) -> bool:
     """执行网络抓包"""
@@ -130,15 +151,6 @@ def main(ip: str, ports: list, duration: int, task_name: str, save_path: str):
     print(f"\n[完成] 处理 {len(pcap_list)} 个端口")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('-i', dest='ip', required=True)
-    parser.add_argument('-p', dest='ports', required=True)
-    parser.add_argument('-d', dest='duration', type=int, default=10)
-    parser.add_argument('-t', dest='task', default='task00')
-    parser.add_argument('-o', dest='output', default='./captures')
-
-    args = parser.parse_args()
-
     # 解析端口列表
     ports = [int(p.strip()) for p in args.ports.split(',')]
 

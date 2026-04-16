@@ -60,8 +60,16 @@ for file in *.so.*; do
     for i in "${!ver_parts[@]}"; do
         current_ver=$(IFS='.'; echo "${ver_parts[*]:0:$i+1}")
         link_name="${base}.so.${current_ver}"
+
+        # 如果与真实文件同名，作为链接起点
+        if [ "$link_name" = "$file" ]; then
+            prev_link="$file"
+            continue
+        fi
+
         [ -z "$prev_link" ] && target="$file" || target="$prev_link"
         [ -L "$link_name" ] && rm -f "$link_name"
+        [ -e "$link_name" ] && { echo "  跳过: $link_name (已存在)"; continue; }
         ln -s "$target" "$link_name"
         echo "  创建: $link_name -> $target"
         prev_link="$link_name"
