@@ -1,72 +1,74 @@
 #!/bin/bash
 
-# =============================================================================
-#  自动清理脚本：当文件数 > 20 时，删除最旧的文件
-#  每 5 秒执行一次
-#  当前目录下所有文件（非子目录）
-#  安全设计：支持隐藏文件排除、日志输出、防误删
-# =============================================================================
+# 目录自动清理守护脚本
 
-# 配置参数
-MAX_FILES=20           # 超过此数量就删除最旧的
-CHECK_INTERVAL=5      # 检查间隔（秒）
-LOG_FILE="./clean.log" # 日志文件路径
-IGNORE_PATTERNS=".git .DS_Store .swp *.tmp"  # 忽略的文件/模式
+show_help() {
+    echo "用法: $0 [-d <目录>] [-n <数量>] [-t <间隔>] [-h]"
+    echo ""
+    echo "选项:"
+    echo "  -d <目录>   监控目录 (默认: 当前目录)"
+    echo "  -n <数量>   最大文件数 (默认: 20)"
+    echo "  -t <间隔>   检查间隔秒数 (默认: 5)"
+    echo "  -h          显示帮助"
+    echo ""
+    echo "示例:"
+    echo "  $0                      # 监控当前目录，最大20文件"
+    echo "  $0 -d /tmp -n 10 -t 10  # 监控/tmp，最大10文件，10秒检查"
+}
 
-# 记录日志函数
+WORK_DIR="."
+MAX_FILES=20
+CHECK_INTERVAL=5
+LOG_FILE="./clean.log"
+IGNORE_PATTERNS=".git .DS_Store .swp *.tmp"
+
+# 无参数时显示帮助
+[ $# -eq 0 ] && { show_help; exit 0; }
+
+while getopts "d:n:t:h" opt; do
+    case $opt in
+        d) WORK_DIR="$OPTARG" ;;
+        n) MAX_FILES="$OPTARG" ;;
+        t) CHECK_INTERVAL="$OPTARG" ;;
+        h) show_help; exit 0 ;;
+        ?) show_help; exit 1 ;;
+    esac
+done
+
+[ -d "$WORK_DIR" ] || { echo "错误: 目录不存在 $WORK_DIR"; exit 1; }
+[[ "$MAX_FILES" =~ ^[0-9]+$ ]] || { echo "错误: 数量必须是数字"; exit 1; }
+[[ "$CHECK_INTERVAL" =~ ^[0-9]+$ ]] || { echo "错误: 间隔必须是数字"; exit 1; }
+
+LOG_FILE="$WORK_DIR/clean.log"
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-# 获取当前目录下所有文件（不含子目录），并过滤掉忽略项
 get_files() {
-    local files=()
-    # 找出所有普通文件（不递归），并排除指定模式
-    for file in *; do
-        # 跳过目录
+    local count=0
+    for file in "$WORK_DIR"/*; do
         [[ -d "$file" ]] && continue
-        # 跳过忽略的文件
         for pattern in $IGNORE_PATTERNS; do
-            [[ "$file" == $pattern ]] && continue 2
+            [[ "$(basename "$file")" == $pattern ]] && continue 2
         done
-        # 保留文件名
-        files+=("$file")
+        ((count++))
     done
-    # 返回数组长度和文件列表
-    echo "${#files[@]}"
-    printf '%s\n' "${files[@]}"
+    echo $count
 }
 
-# 主逻辑
-main() {
-    log "✅ 启动自动清理服务，最大文件数: $MAX_FILES"
+log "启动清理服务: 目录=$WORK_DIR, 最大=$MAX_FILES文件, 间隔=$CHECK_INTERVAL秒"
 
-    while true; do
-        # 统计文件数量
-        count=$(get_files | head -n1)
-        files=$(get_files | tail -n+2)
-
-        # 判断是否需要清理
-        if (( count > MAX_FILES )); then
-            # 按修改时间升序排列，取第一个（最旧）
-	    oldest_file=$(ls -tr | head -n 1)
-
-            if [[ -n "$oldest_file" ]]; then
-                log "[WARN] 超过 $MAX_FILES 个文件（共 $count 个），删除最旧文件：$oldest_file"
-                rm -f "$oldest_file"
-                log "️ [INFO] 已删除：$oldest_file"
-            else
-                log "❌ 未找到可删除的文件（可能全部被忽略或为空）"
-            fi
-        else
-            log "[INFO] 文件数量 $count ≤ $MAX_FILES，无需清理。"
+while true; do
+    count=$(get_files)
+    if (( count > MAX_FILES )); then
+        oldest_file=$(ls -t "$WORK_DIR" | tail -n 1)
+        if [[ -n "$oldest_file" && -f "$WORK_DIR/$oldest_file" ]]; then
+            log "[清理] 共$count文件，删除: $oldest_file"
+            rm -f "$WORK_DIR/$oldest_file"
         fi
-
-        # 等待下一轮
-        sleep "$CHECK_INTERVAL"
-    done
-}
-
-# 启动主程序
-main
-
+    else
+        log "[正常] 文件数: $count"
+    fi
+    sleep "$CHECK_INTERVAL"
+done

@@ -1,176 +1,123 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-文件名: cal_length_by_idcard.py
-功能: 身份证长度计算器
-描述: 通过身份证的对比，计算测量其他物品的长度
-注意: 
-    1. 本应用依赖Python3的opencv-python和numpy库，建议使用pip install scapy进行下载
-创建人: MGter
-创建时间: 2025年7月9日13:46:35
-最后修改时间: 2025年7月9日13:46:35
-版本: 1.0.0
+图像测量工具 - 以身份证宽度(85.6mm)为参考测量图片中物体长度
+依赖: pip install opencv-python numpy
 """
 
-# pip install opencv-python numpy
-import cv2
-import numpy as np
-import math
+import sys
+import os
 
-class ImageDistanceMeasurer:
-    def __init__(self, image_path):
-        self.image = cv2.imread(image_path)
-        if self.image is None:
-            raise FileNotFoundError(f"无法加载图像: {image_path}")
-        
-        self.display_image = self.image.copy()
-        self.ref_points = []  # 存储参考点（身份证宽度端点）
-        self.measure_points = []  # 存储测量点
-        self.mm_per_pixel = None  # 每像素对应的毫米数
-        self.status = "SELECT_REF"  # 当前状态: SELECT_REF, SELECT_MEASURE
-        self.distance_results = []  # 存储测量结果
-        
-        cv2.namedWindow("Image Distance Measurer")
-        cv2.setMouseCallback("Image Distance Measurer", self.mouse_callback)
-        
-    def mouse_callback(self, event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            if self.status == "SELECT_REF":
-                # 选择身份证宽度端点
-                self.ref_points.append((x, y))
-                cv2.circle(self.display_image, (x, y), 8, (0, 0, 255), -1)
-                
-                # 如果已经选择了两个参考点
-                if len(self.ref_points) == 2:
-                    # 计算参考长度（像素）
-                    ref_length_px = math.sqrt(
-                        (self.ref_points[1][0] - self.ref_points[0][0])**2 +
-                        (self.ref_points[1][1] - self.ref_points[0][1])**2
-                    )
-                    
-                    # 计算每像素对应的毫米数（身份证标准长度85.6）
-                    self.mm_per_pixel = 85.6 / ref_length_px
-                    
-                    # 绘制参考线
-                    cv2.line(self.display_image, 
-                             self.ref_points[0], self.ref_points[1], 
-                             (0, 0, 255), 2)
-                    
-                    # 显示比例尺信息
-                    cv2.putText(self.display_image, 
-                                f"Scale: 1 px = {self.mm_per_pixel:.4f} mm", 
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.7, (0, 255, 0), 2)
-                    
-                    # 切换到测量模式
-                    self.status = "SELECT_MEASURE"
-                    print("参考比例尺已设置。现在可以测量其他距离。")
-            
-            elif self.status == "SELECT_MEASURE" and self.mm_per_pixel is not None:
-                # 选择测量点
-                self.measure_points.append((x, y))
-                cv2.circle(self.display_image, (x, y), 8, (0, 255, 0), -1)
-                
-                # 如果已经选择了两个测量点
-                if len(self.measure_points) == 2:
-                    # 计算像素距离
-                    dx = self.measure_points[1][0] - self.measure_points[0][0]
-                    dy = self.measure_points[1][1] - self.measure_points[0][1]
-                    distance_px = math.sqrt(dx**2 + dy**2)
-                    
-                    # 计算实际距离（毫米）
-                    distance_mm = distance_px * self.mm_per_pixel
-                    
-                    # 绘制测量线
-                    cv2.line(self.display_image, 
-                             self.measure_points[0], self.measure_points[1], 
-                             (0, 255, 0), 2)
-                    
-                    # 显示测量结果
-                    mid_x = (self.measure_points[0][0] + self.measure_points[1][0]) // 2
-                    mid_y = (self.measure_points[0][1] + self.measure_points[1][1]) // 2
-                    
-                    cv2.putText(self.display_image, 
-                                f"{distance_mm:.2f} mm", 
-                                (mid_x, mid_y), cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.7, (0, 255, 255), 2)
-                    
-                    # 存储结果
-                    self.distance_results.append({
-                        "points": self.measure_points.copy(),
-                        "distance_mm": distance_mm
-                    })
-                    
-                    # 重置测量点
-                    self.measure_points = []
-                    print(f"测量结果: {distance_mm:.2f} mm")
-    
-    def run(self):
-        print("使用说明:")
-        print("1. 首先在身份证的宽度方向上点击两个端点（例如左边缘和右边缘）")
-        print("2. 然后点击需要测量的两个点")
-        print("3. 按 'r' 重置参考点")
-        print("4. 按 'c' 清除所有测量")
-        print("5. 按 's' 保存结果图像")
-        print("6. 按 ESC 或 'q' 退出")
-        
-        while True:
-            cv2.imshow("Image Distance Measurer", self.display_image)
-            key = cv2.waitKey(1) & 0xFF
-            
-            # 退出程序
-            if key == 27 or key == ord('q'):
-                break
-            
-            # 重置参考点
-            elif key == ord('r'):
-                self.ref_points = []
-                self.measure_points = []
-                self.mm_per_pixel = None
-                self.status = "SELECT_REF"
-                self.display_image = self.image.copy()
-                print("参考点已重置。请重新设置比例尺。")
-            
-            # 清除测量结果
-            elif key == ord('c'):
-                self.measure_points = []
-                self.distance_results = []
-                self.display_image = self.image.copy()
-                
-                # 重新绘制参考线（如果已设置）
-                if self.mm_per_pixel is not None:
-                    cv2.line(self.display_image, 
-                             self.ref_points[0], self.ref_points[1], 
-                             (0, 0, 255), 2)
-                    cv2.putText(self.display_image, 
-                                f"Scale: 1 px = {self.mm_per_pixel:.4f} mm", 
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.7, (0, 255, 0), 2)
-                print("所有测量结果已清除。")
-            
-            # 保存结果图像
-            elif key == ord('s'):
-                output_path = "measurement_result.jpg"
-                cv2.imwrite(output_path, self.display_image)
-                print(f"结果已保存为: {output_path}")
-        
-        cv2.destroyAllWindows()
-        
-        # 打印所有测量结果
-        if self.distance_results:
-            print("\n最终测量结果:")
-            for i, result in enumerate(self.distance_results, 1):
-                print(f"测量 {i}: {result['distance_mm']:.2f} mm")
+def show_help():
+    print("""
+用法: python3 cal_length_by_idcard.py [-i <图像>] [-o <输出>] [-h]
 
-# 使用示例
-if __name__ == "__main__":
-    # 替换为你的图像路径
-    image_path = "input.jpg"
-    
-    try:
-        measurer = ImageDistanceMeasurer(image_path)
-        measurer.run()
-    except FileNotFoundError as e:
-        print(e)
-    except Exception as e:
-        print(f"发生错误: {e}")
+选项:
+  -i <文件>   输入图像文件
+  -o <文件>   输出结果图像 (默认: measurement_result.jpg)
+  -h          显示帮助
+
+操作说明:
+  1. 先点击身份证两端(宽度85.6mm作为参考)
+  2. 再点击要测量的物体两端
+  3. 按 'r' 重置参考点
+  4. 按 'c' 清除测量
+  5. 按 's' 保存结果
+  6. 按 ESC/q 退出
+
+示例:
+  python3 cal_length_by_idcard.py -i photo.jpg
+""")
+
+# 无参数或帮助模式
+if len(sys.argv) == 1 or '-h' in sys.argv:
+    show_help()
+    sys.exit(0)
+
+import argparse
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('-i', dest='input', required=True)
+parser.add_argument('-o', dest='output', default='measurement_result.jpg')
+args = parser.parse_args()
+
+if not os.path.exists(args.input):
+    print(f"[错误] 文件不存在: {args.input}")
+    sys.exit(1)
+
+try:
+    import cv2
+    import math
+except ImportError:
+    print("[错误] 缺少opencv，请执行: pip install opencv-python")
+    sys.exit(1)
+
+image = cv2.imread(args.input)
+if image is None:
+    print(f"[错误] 无法加载图像: {args.input}")
+    sys.exit(1)
+
+display = image.copy()
+ref_points = []
+measure_points = []
+mm_per_pixel = None
+results = []
+status = "REF"
+
+def mouse_cb(event, x, y, flags, param):
+    global status, mm_per_pixel
+    if event != cv2.EVENT_LBUTTONDOWN:
+        return
+    cv2.circle(display, (x, y), 8, (0, 0, 255) if status == "REF" else (0, 255, 0), -1)
+    if status == "REF":
+        ref_points.append((x, y))
+        if len(ref_points) == 2:
+            px_len = math.sqrt((ref_points[1][0]-ref_points[0][0])**2 + (ref_points[1][1]-ref_points[0][1])**2)
+            mm_per_pixel = 85.6 / px_len
+            cv2.line(display, ref_points[0], ref_points[1], (0, 0, 255), 2)
+            cv2.putText(display, f"Scale: {mm_per_pixel:.4f} mm/px", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            status = "MEASURE"
+            print("[提示] 参考已设置，现在测量物体")
+    elif status == "MEASURE" and mm_per_pixel:
+        measure_points.append((x, y))
+        if len(measure_points) == 2:
+            px_len = math.sqrt((measure_points[1][0]-measure_points[0][0])**2 + (measure_points[1][1]-measure_points[0][1])**2)
+            mm_len = px_len * mm_per_pixel
+            cv2.line(display, measure_points[0], measure_points[1], (0, 255, 0), 2)
+            mid = ((measure_points[0][0]+measure_points[1][0])//2, (measure_points[0][1]+measure_points[1][1])//2)
+            cv2.putText(display, f"{mm_len:.2f} mm", mid, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            results.append(mm_len)
+            print(f"[测量] {mm_len:.2f} mm")
+            measure_points = []
+
+cv2.namedWindow("Measure")
+cv2.setMouseCallback("Measure", mouse_cb)
+
+print("[提示] 按 r重置, c清除, s保存, q退出")
+while True:
+    cv2.imshow("Measure", display)
+    key = cv2.waitKey(1) & 0xFF
+    if key == 27 or key == ord('q'):
+        break
+    elif key == ord('r'):
+        ref_points = []
+        measure_points = []
+        mm_per_pixel = None
+        status = "REF"
+        display = image.copy()
+        print("[重置] 请重新设置参考")
+    elif key == ord('c'):
+        measure_points = []
+        results = []
+        display = image.copy()
+        if mm_per_pixel:
+            cv2.line(display, ref_points[0], ref_points[1], (0, 0, 255), 2)
+            cv2.putText(display, f"Scale: {mm_per_pixel:.4f} mm/px", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        print("[清除] 测量已清除")
+    elif key == ord('s'):
+        cv2.imwrite(args.output, display)
+        print(f"[保存] {args.output}")
+
+cv2.destroyAllWindows()
+if results:
+    print("\n[结果]")
+    for i, r in enumerate(results, 1):
+        print(f"  测量{i}: {r:.2f} mm")
