@@ -10,8 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 网络测试工具 (network_tools/)
 - `ffmpeg_push.sh` - ffmpeg多端口UDP推流，支持循环推流和端口递增
-- `pcap_sender.py` - PCAP文件回放工具，支持时序保留模式和无限循环
-- `udp_sender.py` - 按指定码率发送TS流文件
+- `udp_sender.py` - UDP发送工具，支持TS流按码率发送和PCAP回放
 - `multi_cap_parser.py` - 多端口并行抓包+TS流时间戳解析对比
 - `pcap_extractor.py` - 从PCAP文件提取UDP负载保存为TS
 
@@ -30,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Dependencies
 
 Python脚本依赖：
-- `scapy` - 网络包处理（multi_cap_parser.py, pcap_sender.py, pcap_extractor.py）
+- `scapy` - 网络包处理（multi_cap_parser.py, udp_sender.py PCAP模式, pcap_extractor.py）
 - `opencv-python`, `numpy` - 图像处理（image_measurer.py）
 
 Shell脚本依赖：
@@ -43,11 +42,11 @@ Shell脚本依赖：
 # ffmpeg多端口推流
 ffmpeg_push.sh -f input.ts -i 127.0.0.1 -p 30000 -n 5
 
-# PCAP回放（保留时序）
-python3 pcap_sender.py -f input.pcap -i 192.165.56.184 -p 13000 --preserve-timing
-
-# UDP发送（指定码率）
+# TS流按码率发送
 python3 udp_sender.py -f input.ts -i 127.0.0.1 -p 25234 -b 16600000
+
+# PCAP回放（保留时序）
+python3 udp_sender.py -f input.pcap -i 192.165.56.184 -p 13000 --preserve-timing
 
 # PCAP提取UDP负载
 python3 pcap_extractor.py -i input.pcap -o output.ts

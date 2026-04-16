@@ -180,21 +180,16 @@ if not os.path.exists(args.input):
 | | `-t <任务名>` | string | 任务名称 |
 | | `-o <目录>` | directory | 输出: 结果保存目录 |
 | | `-h` | flag | 显示帮助 |
-| `pcap_sender.py` | `-f <文件>` | filepath(.pcap) | 输入: PCAP文件 |
-| | `-i <IP>` | ipv4 | 目标: 发送IP地址 |
-| | `-p <端口>` | port | 目标: 发送端口 |
-| | `-n <次数>` | integer | 循环次数(-1无限) |
-| | `-t <间隔>` | float | 循环间隔(秒) |
-| | `--preserve-timing` | flag | 保留原始时序 |
+| `udp_sender.py` | `-f <文件>` | filepath(.ts/.pcap) | 输入: TS流或PCAP文件 (必选) |
+| | `-i <IP>` | ipv4 | 目标: 发送IP地址 (必选) |
+| | `-p <端口>` | port | 目标: 发送端口 (必选) |
+| | `-b <码率>` | integer | 配置: TS模式比特率bps (TS必选) |
+| | `-n <次数>` | integer | 配置: 循环次数，-1无限 (默认: 1) |
+| | `-t <间隔>` | float | 配置: PCAP循环间隔秒数 (默认: 1.0) |
+| | `--preserve-timing` | flag | 配置: PCAP保留原始时序 |
 | | `-h` | flag | 显示帮助 |
 | `pcap_extractor.py` | `-i <文件>` | filepath(.pcap) | 输入: PCAP文件 |
 | | `-o <文件>` | filepath(.ts) | 输出: 提取的TS文件 |
-| | `-h` | flag | 显示帮助 |
-| `udp_sender.py` | `-f <文件>` | filepath(.ts) | 输入: TS流文件 |
-| | `-i <IP>` | ipv4 | 目标: 发送IP地址 |
-| | `-p <端口>` | port | 目标: 发送端口 |
-| | `-b <码率>` | integer | 发送比特率(bps) |
-| | `-n <次数>` | integer | 循环次数(-1无限) |
 | | `-h` | flag | 显示帮助 |
 
 ### sysadmin_tools/
