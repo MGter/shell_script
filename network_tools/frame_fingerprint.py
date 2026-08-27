@@ -15,7 +15,7 @@ def show_help():
 
 选项:
   -f <文件>  输入: TS文件路径，可指定一个或两个 (必选; 一个出单路图, 两个出对比图)
-  -o <文件>  输出: 指纹SVG文件路径 (默认: fingerprint_compare.svg)
+  -o <文件>  输出: 指纹图文件; .html为可缩放交互图(滚轮缩放/拖拽/比例尺), .svg为静态图 (默认: fingerprint_compare.svg)
   -n <帧数>  配置: 最多处理前N帧，用于快速预览 (默认: 全部)
   -h         显示帮助信息
 
@@ -169,6 +169,181 @@ def svg_compare(a, b, out_file):
     print(f"[输出] SVG: {out_file}")
 
 
+def html_viewer(a, b, out_file):
+    """生成可缩放/平移/带比例尺的交互式 HTML 指纹图"""
+    p0 = a[0][0] if not b else min(a[0][0], b[0][0])
+
+    def to_series(rows):
+        return [[(p - p0) / 90000.0, h / 2**64, luma / 255.0] for (p, i, h, luma) in rows]
+
+    sa = to_series(a)
+    sb = to_series(b) if b else []
+    if not sa:
+        print("[错误] 无有效数据")
+        return
+
+    js = (
+        "const DATA_A = " + json.dumps(sa) + ";\n"
+        "const DATA_B = " + json.dumps(sb) + ";\n"
+    )
+
+    html = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Frame Fingerprint Viewer</title>
+<style>
+  body { font-family: "Microsoft YaHei", Arial, sans-serif; margin: 20px; background: #faf9f7; }
+  h1 { font-size: 20px; color: #333; }
+  .hint { font-size: 13px; color: #777; margin-bottom: 6px; }
+  #chart { position: relative; width: 100%; max-width: 1500px; background: #fff;
+           border: 1px solid #e0dbd3; border-radius: 8px; overflow: hidden; }
+  svg { display: block; width: 100%; height: 560px; touch-action: none; }
+  #tooltip { position: absolute; pointer-events: none; background: rgba(0,0,0,.78);
+             color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 12px; display: none;
+             white-space: pre; }
+  #scalebar { position: absolute; left: 90px; bottom: 16px; background: #fff;
+              border: 1px solid #999; border-left: none; height: 12px; display: flex; }
+  #scalebar span { position: absolute; left: 100%; padding-left: 4px; font-size: 11px;
+                   color: #555; white-space: nowrap; }
+  #controls { margin: 6px 0; font-size: 12px; color: #555; }
+  button { margin-right: 8px; }
+  .lg { font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>Frame Fingerprint Viewer</h1>
+<div class="hint">滚轮=缩放(x轴), 拖拽=平移, 悬停=查看数值; 底部比例尺随缩放更新</div>
+<div id="controls"><button onclick="resetView()">重置视图</button><span id="viewinfo"></span></div>
+<div id="chart">
+  <svg id="svg"></svg>
+  <div id="scalebar"><span id="scalebarLabel"></span></div>
+  <div id="tooltip"></div>
+  <div class="lg">红=FileA(dHash) 蓝=FileB(dHash,虚线); 细线=亮度</div>
+</div>
+<script>
+""" + js + """
+const W=1500, H=560, L=90, R=1480, T=48, B=500, sp=0.55;
+let view = {x0:null, x1:null};
+(function init(){
+  let xs = DATA_A.map(p=>p[0]);
+  if (DATA_B.length) xs = xs.concat(DATA_B.map(p=>p[0]));
+  view.x0 = Math.min(...xs); view.x1 = Math.max(...xs);
+  render();
+})();
+function x2px(x){ return L + (x-view.x0)/(view.x1-view.x0 || 1)*(R-L); }
+function y2dh(y){ return T + (1-y)*(B-T)*sp; }
+function y2lu(y){ return T + (B-T)*sp + (1-y)*(B-T)*(1-sp); }
+function polyFrom(series, yfn){
+  const pts=[];
+  for (const p of series){
+    if (p[0] < view.x0 || p[0] > view.x1) continue;
+    pts.push([x2px(p[0]).toFixed(1), yfn(p[p.length-1]===undefined?1:p[1]).toFixed(1)]);
+  }
+  return pts.map(q=>q.join(",")).join(" ");
+}
+function render(){
+  const svg=document.getElementById("svg"); svg.innerHTML="";
+  const NS="http://www.w3.org/2000/svg";
+  const el=(tag,attrs)=>{const e=document.createElementNS(NS,tag); for(const k in attrs)e.setAttribute(k,attrs[k]); return e;};
+  svg.appendChild(el("rect",{x:0,y:0,width:W,height:H,fill:"#fff"}));
+  // grid + x labels
+  const nseg=8;
+  for(let i=0;i<=nseg;i++){
+    const xv=view.x0+(view.x1-view.x0)*i/nseg, px=x2px(xv);
+    svg.appendChild(el("line",{x1:px,y1:T,x2:px,y2:B,stroke:"#ece8e2"}));
+    const t=el("text",{x:px+3,y:B+14,"font-size":"10",fill:"#888"}); t.textContent=xv.toFixed(2); svg.appendChild(t);
+  }
+  for(const yv of [0,0.5,1]){
+    const py=y2dh(yv);
+    svg.appendChild(el("line",{x1:L,y1:py,x2:R,y2:py,stroke:"#ece8e2"}));
+  }
+  // labels
+  for(const [txt,fn,color] of [["dHash",y2dh,"#c0392b"],["Luma",y2lu,"#2f6f63"]]){
+    const t=el("text",{x:6,y:fn(0.25)+4,"font-size":"12",fill:color}); t.textContent=txt; svg.appendChild(t);
+  }
+  // curves
+  if(DATA_A.length){
+    svg.appendChild(el("polyline",{fill:"none",stroke:"#c0392b","stroke-width":1.3,
+      points:polyFrom(DATA_A,p=>p[1])}));
+    svg.appendChild(el("polyline",{fill:"none",stroke:"#e8a49b","stroke-width":1,
+      points:polyFrom(DATA_A,p=>p[2])}));
+  }
+  if(DATA_B.length){
+    svg.appendChild(el("polyline",{fill:"none",stroke:"#2980b9","stroke-width":1.3, "stroke-dasharray":"5,3",
+      points:polyFrom(DATA_B,p=>p[1])}));
+    svg.appendChild(el("polyline",{fill:"none",stroke:"#9bc7e8","stroke-width":1,
+      points:polyFrom(DATA_B,p=>p[2])}));
+  }
+  // scale bar (目标: 10 等分的刻度)
+  const range=view.x1-view.x0;
+  const stepNice=[60*60*24,60*60,60,10,5,2,1,0.5,0.2,0.1,0.05,0.02,0.01].find(s=>range/s<=13)||0.01;
+  const ticks=Math.round(range/stepNice);
+  const bar=document.getElementById("scalebar");
+  const pxW=Math.round((R-L)/ticks);
+  bar.innerHTML="";
+  bar.style.width=pxW+"px";
+  bar.style.height="12px";
+  bar.style.border="1px solid #666"; bar.style.borderLeft="1px solid #666";
+  const lab=document.createElement("span"); lab.textContent=stepNice>=1? stepNice+" s":(stepNice*1000)+" ms";
+  bar.appendChild(lab);
+  document.getElementById("viewinfo").textContent=
+    "  [视图] "+view.x0.toFixed(2)+" ~ "+view.x1.toFixed(2)+" s (共 "+(view.x1-view.x0).toFixed(2)+" s), 每格 "+stepNice+" s";
+  // tooltip mouse move
+  svg.onmousemove=e=>{ const rect=svg.getBoundingClientRect();
+    const px=(e.clientX-rect.left)/rect.width*W;
+    const xv=view.x0+(px-L)/(R-L)*(view.x1-view.x0);
+    let txt="x="+xv.toFixed(3)+" s\\n";
+    const find=(data)=>data.reduce((best,p)=>Math.abs(p[0]-xv)<Math.abs(best[0]-xv)?p:best,null);
+    const a=find(DATA_A), b=find(DATA_B);
+    if(a) txt+="A dhash="+a[1].toFixed(3)+" luma="+a[2].toFixed(3)+"\\n";
+    if(b) txt+="B dhash="+b[1].toFixed(3)+" luma="+b[2].toFixed(3);
+    const tip=document.getElementById("tooltip");
+    tip.style.display="block";
+    tip.style.left=(e.clientX-rect.left+14)+"px"; tip.style.top=(e.clientY-rect.top-10)+"px";
+    tip.textContent=txt;
+  };
+  svg.onmouseleave=()=>{document.getElementById("tooltip").style.display="none";};
+}
+// zoom on wheel (以鼠标为中心缩放 x)
+document.getElementById("svg").addEventListener("wheel",e=>{
+  e.preventDefault();
+  const rect=document.getElementById("svg").getBoundingClientRect();
+  const px=(e.clientX-rect.left)/rect.width*W;
+  const t=view.x0+(px-L)/(R-L)*(view.x1-view.x0);
+  const factor=e.deltaY>0?0.85:1.175;
+  const r=view.x1-view.x0;
+  let x0=t-(t-view.x0)*factor, x1=t+(view.x1-t)*factor;
+  if(x1-x0 < 0.001){ x1=x0+0.001; }
+  view={x0,x1}; render();
+},{passive:false});
+// drag to pan
+let dragging=false, dragStartX=0, dragStartView=null;
+document.getElementById("svg").addEventListener("mousedown",e=>{dragging=true;
+  const rect=document.getElementById("svg").getBoundingClientRect();
+  dragStartX=(e.clientX-rect.left)/rect.width*W; dragStartView={...view};});
+document.addEventListener("mousemove",e=>{
+  if(!dragging) return;
+  const rect=document.getElementById("svg").getBoundingClientRect();
+  const px=(e.clientX-rect.left)/rect.width*W;
+  const range=dragStartView.x1-dragStartView.x0;
+  const dx=-(px-dragStartX)/ (R-L) * range;
+  view={x0:dragStartView.x0+dx, x1:dragStartView.x1+dx}; render();
+});
+document.addEventListener("mouseup",()=>{dragging=false;});
+function resetView(){
+  let xs=DATA_A.map(p=>p[0]); if(DATA_B.length) xs=xs.concat(DATA_B.map(p=>p[0]));
+  view.x0=Math.min(...xs); view.x1=Math.max(...xs); render();
+}
+</script>
+</body>
+</html>"""
+
+    with open(out_file, "w") as f:
+        f.write(html)
+    print(f"[输出] HTML: {out_file}")
+
+
 if __name__ == "__main__":
     # 无参数或帮助模式
     if len(sys.argv) == 1 or '-h' in sys.argv:
@@ -180,7 +355,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-f', dest='input', action='append', help='输入: TS文件(可指定两个)')
-    parser.add_argument('-o', dest='output', default='fingerprint_compare.svg', help='输出: SVG文件')
+    parser.add_argument('-o', dest='output', default='fingerprint_compare.svg', help='输出: 指纹图文件(.html交互/.svg静态)')
     parser.add_argument('-n', dest='max_frames', type=int, default=None, help='配置: 最大帧数')
     args = parser.parse_args()
 
@@ -211,6 +386,9 @@ if __name__ == "__main__":
         write_csv(f, rows)
 
     if len(args.input) >= 1:
-        svg_compare(rows_all[args.input[0]],
-                    rows_all[args.input[1]] if len(args.input) == 2 else [],
-                    args.output)
+        a = rows_all[args.input[0]]
+        b = rows_all[args.input[1]] if len(args.input) == 2 else []
+        if args.output.lower().endswith(".html"):
+            html_viewer(a, b, args.output)
+        else:
+            svg_compare(a, b, args.output)

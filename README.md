@@ -98,7 +98,10 @@ python3 pcap_extractor.py -i input.pcap -o output.ts
 ```bash
 # 计算两个TS文件每帧指纹(dHash+亮度)并绘制对比SVG
 python3 frame_fingerprint.py -f a.ts -f b.ts -o compare.svg
-# 快速预览前200帧
+# 交互式可缩放图(滚轮缩放/拖拽平移/比例尺)
+python3 frame_fingerprint.py -f a.ts -f b.ts -o compare.html
+# 单文件出图 / 快速预览前200帧
+python3 frame_fingerprint.py -f a.ts -o single.svg
 python3 frame_fingerprint.py -f a.ts -f b.ts -n 200
 ```
 
