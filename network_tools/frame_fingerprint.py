@@ -265,15 +265,15 @@ function render(){
   // curves
   if(DATA_A.length){
     svg.appendChild(el("polyline",{fill:"none",stroke:"#c0392b","stroke-width":1.3,
-      points:polyFrom(DATA_A,p=>p[1])}));
+      points:polyFrom(DATA_A,p=>y2dh(p[1]))}));
     svg.appendChild(el("polyline",{fill:"none",stroke:"#e8a49b","stroke-width":1,
-      points:polyFrom(DATA_A,p=>p[2])}));
+      points:polyFrom(DATA_A,p=>y2lu(p[2]))}));
   }
   if(DATA_B.length){
     svg.appendChild(el("polyline",{fill:"none",stroke:"#2980b9","stroke-width":1.3, "stroke-dasharray":"5,3",
-      points:polyFrom(DATA_B,p=>p[1])}));
+      points:polyFrom(DATA_B,p=>y2dh(p[1]))}));
     svg.appendChild(el("polyline",{fill:"none",stroke:"#9bc7e8","stroke-width":1,
-      points:polyFrom(DATA_B,p=>p[2])}));
+      points:polyFrom(DATA_B,p=>y2lu(p[2]))}));
   }
   // scale bar (目标: 10 等分的刻度)
   const range=view.x1-view.x0;
