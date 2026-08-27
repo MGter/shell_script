@@ -14,8 +14,8 @@ def show_help():
 用法: python3 frame_fingerprint.py [-f <文件>] [-f <文件>] [-o <文件>] [-n <帧数>] [-h]
 
 选项:
-  -f <文件>  输入: TS文件路径，可重复指定两个 (必选，对比用)
-  -o <文件>  输出: 对比SVG文件路径 (默认: fingerprint_compare.svg)
+  -f <文件>  输入: TS文件路径，可指定一个或两个 (必选; 一个出单路图, 两个出对比图)
+  -o <文件>  输出: 指纹SVG文件路径 (默认: fingerprint_compare.svg)
   -n <帧数>  配置: 最多处理前N帧，用于快速预览 (默认: 全部)
   -h         显示帮助信息
 
@@ -104,13 +104,14 @@ def write_csv(file_path, rows):
 
 
 def svg_compare(a, b, out_file):
-    """画两个文件指纹对比SVG"""
-    p0 = min(a[0][0], b[0][0])
+    """画指纹对比SVG(一个或两个文件; b为空则只画文件A)"""
+    p0 = a[0][0] if not b else min(a[0][0], b[0][0])
 
     def to_series(rows):
         return [((p - p0) / 90000.0, h / 2**64, luma / 255.0) for (p, i, h, luma) in rows]
 
-    sa, sb = to_series(a), to_series(b)
+    sa = to_series(a)
+    sb = to_series(b) if b else []
     xs = [x for (x, _, _) in sa] + [x for (x, _, _) in sb]
     if not xs:
         print("[错误] 无有效数据")
@@ -136,7 +137,7 @@ def svg_compare(a, b, out_file):
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">',
         f'<rect width="{W}" height="{H}" fill="#fff"/>',
-        f'<text x="{W/2}" y="26" text-anchor="middle" font-size="20" font-weight="bold" font-family="Arial">Frame fingerprint compare</text>',
+        f'<text x="{W/2}" y="26" text-anchor="middle" font-size="20" font-weight="bold" font-family="Arial">Frame fingerprint {("compare" if sb else "single")}</text>',
         f'<text x="{W/2}" y="{H-8}" text-anchor="middle" font-size="13" font-family="Arial">PTS relative (s)</text>',
         f'<text x="6" y="{T+(B-T)*0.25}" font-size="12" fill="#c0392b" font-family="Arial">dHash</text>',
         f'<text x="6" y="{T+(B-T)*sp+(B-T)*0.25}" font-size="12" fill="#2f6f63" font-family="Arial">Luma</text>',
@@ -150,15 +151,18 @@ def svg_compare(a, b, out_file):
     for yv in (0.0, 0.5, 1.0):
         parts.append(f'<line x1="{L}" y1="{y2dh(yv):.1f}" x2="{R}" y2="{y2dh(yv):.1f}" stroke="#ece8e2"/>')
     parts.append(poly([(x, y) for (x, y, _) in sa], "#c0392b", 1.3))
-    parts.append(poly([(x, y) for (x, y, _) in sb], "#2980b9", 1.3, dash="5,3"))
+    if sb:
+        parts.append(poly([(x, y) for (x, y, _) in sb], "#2980b9", 1.3, dash="5,3"))
     parts.append(poly2([(x, z) for (x, _, z) in sa], "#e8a49b"))
-    parts.append(poly2([(x, z) for (x, _, z) in sb], "#9bc7e8"))
+    if sb:
+        parts.append(poly2([(x, z) for (x, _, z) in sb], "#9bc7e8"))
     ly = B + 22
     parts.append(f'<rect x="{L}" y="{ly}" width="10" height="10" fill="#c0392b"/>')
     parts.append(f'<text x="{L+16}" y="{ly+10}" font-size="12" font-family="Arial">File A dHash</text>')
-    parts.append(f'<rect x="{L+150}" y="{ly}" width="10" height="10" fill="#2980b9"/>')
-    parts.append(f'<text x="{L+166}" y="{ly+10}" font-size="12" font-family="Arial">File B dHash (虚线)</text>')
-    parts.append(f'<text x="{L+360}" y="{ly+10}" font-size="12" fill="#888" font-family="Arial">细线=亮度: A #e8a49b B #9bc7e8</text>')
+    if sb:
+        parts.append(f'<rect x="{L+150}" y="{ly}" width="10" height="10" fill="#2980b9"/>')
+        parts.append(f'<text x="{L+166}" y="{ly+10}" font-size="12" font-family="Arial">File B dHash (虚线)</text>')
+    parts.append(f'<text x="{L+360}" y="{ly+10}" font-size="12" fill="#888" font-family="Arial">细线=亮度: A #e8a49b' + (' B #9bc7e8' if sb else '') + '</text>')
     parts.append("</svg>")
     with open(out_file, "w") as f:
         f.write("\n".join(parts))
@@ -206,5 +210,7 @@ if __name__ == "__main__":
         rows_all[f] = rows
         write_csv(f, rows)
 
-    if len(args.input) == 2:
-        svg_compare(rows_all[args.input[0]], rows_all[args.input[1]], args.output)
+    if len(args.input) >= 1:
+        svg_compare(rows_all[args.input[0]],
+                    rows_all[args.input[1]] if len(args.input) == 2 else [],
+                    args.output)
