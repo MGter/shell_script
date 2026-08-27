@@ -238,7 +238,7 @@ function polyFrom(series, yfn){
   const pts=[];
   for (const p of series){
     if (p[0] < view.x0 || p[0] > view.x1) continue;
-    pts.push([x2px(p[0]).toFixed(1), yfn(p[p.length-1]===undefined?1:p[1]).toFixed(1)]);
+    pts.push([x2px(p[0]).toFixed(1), yfn(p).toFixed(1)]);
   }
   return pts.map(q=>q.join(",")).join(" ");
 }
@@ -294,7 +294,7 @@ function render(){
     const px=(e.clientX-rect.left)/rect.width*W;
     const xv=view.x0+(px-L)/(R-L)*(view.x1-view.x0);
     let txt="x="+xv.toFixed(3)+" s\\n";
-    const find=(data)=>data.reduce((best,p)=>Math.abs(p[0]-xv)<Math.abs(best[0]-xv)?p:best,null);
+    const find=(data)=>{let best=null; for(const p of data){ if(best===null||Math.abs(p[0]-xv)<Math.abs(best[0]-xv)) best=p;} return best;};
     const a=find(DATA_A), b=find(DATA_B);
     if(a) txt+="A dhash="+a[1].toFixed(3)+" luma="+a[2].toFixed(3)+"\\n";
     if(b) txt+="B dhash="+b[1].toFixed(3)+" luma="+b[2].toFixed(3);
