@@ -198,7 +198,7 @@ def html_viewer(a, b, out_file):
   .hint { font-size: 13px; color: #777; margin-bottom: 6px; }
   #chart { position: relative; width: 100%; max-width: 1500px; background: #fff;
            border: 1px solid #e0dbd3; border-radius: 8px; overflow: hidden; }
-  svg { display: block; width: 100%; height: 560px; touch-action: none; }
+  svg { display: block; width: 100%; height: 560px; touch-action: none; background: #fff; }
   #tooltip { position: absolute; pointer-events: none; background: rgba(0,0,0,.78);
              color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 12px; display: none;
              white-space: pre; }
@@ -216,7 +216,7 @@ def html_viewer(a, b, out_file):
 <div class="hint">滚轮=缩放(x轴), 拖拽=平移, 悬停=查看数值; 底部比例尺随缩放更新</div>
 <div id="controls"><button onclick="resetView()">重置视图</button><span id="viewinfo"></span></div>
 <div id="chart">
-  <svg id="svg"></svg>
+  <svg id="svg" viewBox="0 0 1500 560" width="100%" height="560"></svg>
   <div id="scalebar"><span id="scalebarLabel"></span></div>
   <div id="tooltip"></div>
   <div class="lg">红=FileA(dHash) 蓝=FileB(dHash,虚线); 细线=亮度</div>
