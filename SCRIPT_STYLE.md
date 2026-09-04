@@ -191,6 +191,9 @@ if not os.path.exists(args.input):
 | `pcap_extractor.py` | `-i <文件>` | filepath(.pcap) | 输入: PCAP文件 |
 | | `-o <文件>` | filepath(.ts) | 输出: 提取的TS文件 |
 | | `-h` | flag | 显示帮助 |
+| `set_policy_routing.py` | `<网卡>` | interface | 目标: 配置源策略路由的网卡 |
+| | `[表ID]` | integer(1-252) | 配置: 策略路由表 ID (默认: 203) |
+| | `-h` | flag | 显示帮助 |
 
 ### sysadmin_tools/
 

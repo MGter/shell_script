@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Script Categories
 
 ### 网络测试工具 (network_tools/)
+- `set_policy_routing.py` - IPv4源策略路由设置，按网卡源地址配置专用路由表
 - `ffmpeg_push.sh` - ffmpeg多端口UDP推流，支持循环推流和端口递增
 - `udp_sender.py` - UDP发送工具，支持TS流按码率发送和PCAP回放
 - `multi_cap_parser.py` - 多端口并行抓包+TS流时间戳解析对比
@@ -39,6 +40,9 @@ Shell脚本依赖：
 ## Common Commands
 
 ```bash
+# IPv4源策略路由
+sudo python3 network_tools/set_policy_routing.py enp8s0 203
+
 # ffmpeg多端口推流
 ffmpeg_push.sh -f input.ts -i 127.0.0.1 -p 30000 -n 5
 

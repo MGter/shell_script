@@ -19,7 +19,8 @@ shell_script/
 │   ├── udp_sender.py        # UDP发送工具(TS流/PCAP回放)
 │   ├── multi_cap_parser.py  # 多端口并行抓包+TS流解析
 │   ├── pcap_extractor.py    # PCAP提取UDP负载
-│   └── frame_fingerprint.py # 逐帧内容指纹对比(TS)
+│   ├── frame_fingerprint.py # 逐帧内容指纹对比(TS)
+│   └── set_policy_routing.py # IPv4源策略路由设置
 │
 ├── sysadmin_tools/          # 系统运维工具
 │   ├── auto_clean.sh        # 目录自动清理守护脚本
@@ -65,6 +66,15 @@ ffmpeg_push.sh -f input.ts -i 127.0.0.1 -p 30000 -n 5
 
 # 停止所有推流进程
 ffmpeg_push.sh -s
+```
+
+**set_policy_routing.py** - IPv4源策略路由设置
+```bash
+# 为指定网卡配置源策略路由，默认使用路由表203
+sudo python3 set_policy_routing.py enp8s0
+
+# 指定策略路由表ID
+sudo python3 set_policy_routing.py enp8s0 203
 ```
 
 **udp_sender.py** - UDP发送工具
@@ -157,6 +167,7 @@ python3 image_measurer.py -i photo.jpg
 | multi_cap_parser.py | tcpdump, ffprobe, scapy |
 | pcap_extractor.py | scapy |
 | frame_fingerprint.py | ffmpeg, ffprobe |
+| set_policy_routing.py | iproute2 (`ip`), procps (`sysctl`)，需root |
 | image_measurer.py | opencv-python, numpy |
 | sysinfo_checker.py | dmidecode (需root) |
 
