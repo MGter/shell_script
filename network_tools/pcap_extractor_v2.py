@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-PCAP UDP 负载提取工具（Scapy 版本）。
+PCAP UDP 负载提取工具（标准库版本）。
 
-依赖: pip install scapy
+只使用 Python 标准库，不依赖 Scapy。支持 classic pcap 和常见的 pcapng
+文件，以及 Ethernet、Linux cooked、RAW 和 loopback 链路类型。
 
-支持 classic pcap / pcapng，可按源/目的 IP 与端口过滤（逗号分隔列表），
-并在输出时做 MPEG-TS 188 字节对齐自检，发现混流立即告警。
-
-注: 纯标准库版本 pcap_extractor_v2.py 更快且无需安装 scapy，建议优先使用。
+支持按源/目的 IP 与端口过滤（逗号分隔列表），并在输出时做 MPEG-TS
+188 字节对齐自检，发现混流立即告警。
 """
 
 import argparse
 import ipaddress
 import os
+import struct
 import sys
 
 SCRIPT_NAME = os.path.basename(__file__)
@@ -23,18 +23,272 @@ PCAP_MAGICS = {
     b"\xa1\xb2\x3c\x4d",  # nanosecond, big endian
 }
 PCAPNG_MAGIC = b"\x0a\x0d\x0d\x0a"
+MAX_BLOCK_BYTES = 256 * 1024 * 1024
 TS_PACKET_SIZE = 188
 TS_SYNC_BYTE = 0x47
+
+
+class PcapError(ValueError):
+    """PCAP 文件格式或内容错误。"""
+
+
+def _read_exact(file_obj, size):
+    data = file_obj.read(size)
+    if len(data) != size:
+        raise PcapError("PCAP 文件在包数据结束前意外结束")
+    return data
+
+
+def _iter_classic_pcap(file_obj):
+    """逐包读取 classic pcap，返回 (链路类型, 原始帧)。"""
+    header = _read_exact(file_obj, 24)
+    magic = header[:4]
+    formats = {
+        b"\xd4\xc3\xb2\xa1": "<",  # microsecond, little endian
+        b"\xa1\xb2\xc3\xd4": ">",  # microsecond, big endian
+        b"\x4d\x3c\xb2\xa1": "<",  # nanosecond, little endian
+        b"\xa1\xb2\x3c\x4d": ">",  # nanosecond, big endian
+    }
+    endian = formats.get(magic)
+    if endian is None:
+        raise PcapError("不是支持的 classic pcap 文件")
+
+    _version_major, _version_minor, _tz, _sigfigs, _snaplen, linktype = struct.unpack(
+        endian + "HHiiii", header[4:]
+    )
+
+    while True:
+        packet_header = file_obj.read(16)
+        if not packet_header:
+            return
+        if len(packet_header) != 16:
+            raise PcapError("PCAP 包头不完整")
+        _ts_sec, _ts_fraction, captured_len, _original_len = struct.unpack(
+            endian + "IIII", packet_header
+        )
+        # 防止损坏的长度字段造成超大内存分配或长时间等待。
+        if captured_len > MAX_BLOCK_BYTES:
+            raise PcapError(f"单个包长度异常: {captured_len} 字节")
+        yield linktype, _read_exact(file_obj, captured_len)
+
+
+def _iter_pcapng(file_obj):
+    """逐包读取 pcapng 的 Enhanced/旧式 Packet Block。"""
+    endian = None
+    linktypes = {}
+
+    while True:
+        block_header = file_obj.read(8)
+        if not block_header:
+            return
+        if len(block_header) != 8:
+            raise PcapError("pcapng 块头不完整")
+
+        block_type_raw = block_header[:4]
+        total_length_raw = block_header[4:8]
+        # Section Header Block 的字节序标记位于块头之后，需先读出块体。
+        # 其他块沿用当前 section 的字节序。
+        if block_type_raw == PCAPNG_MAGIC:
+            # SHB 的长度字段总是可按任一端序解释，先尝试读取两种结果。
+            little_length = struct.unpack("<I", total_length_raw)[0]
+            big_length = struct.unpack(">I", total_length_raw)[0]
+            total_length = little_length if 16 <= little_length <= MAX_BLOCK_BYTES else big_length
+            if total_length < 16 or total_length > MAX_BLOCK_BYTES:
+                raise PcapError(f"pcapng 块长度异常: {total_length}")
+            remaining = _read_exact(file_obj, total_length - 8)
+            body = remaining[:-4]
+            byte_order_magic = body[:4]
+            if byte_order_magic == b"\x4d\x3c\x2b\x1a":
+                endian = "<"
+            elif byte_order_magic == b"\x1a\x2b\x3c\x4d":
+                endian = ">"
+            else:
+                raise PcapError("pcapng 字节序标记无效")
+        else:
+            if endian is None:
+                raise PcapError("pcapng 文件缺少 Section Header Block")
+            block_type = struct.unpack(endian + "I", block_type_raw)[0]
+            total_length = struct.unpack(endian + "I", total_length_raw)[0]
+            if total_length < 16 or total_length > MAX_BLOCK_BYTES:
+                raise PcapError(f"pcapng 块长度异常: {total_length} 字节")
+            remaining = _read_exact(file_obj, total_length - 8)
+            body = remaining[:-4]
+
+        trailing_length = struct.unpack(endian + "I", remaining[-4:])[0]
+        if trailing_length != total_length:
+            raise PcapError("pcapng 块首尾长度不一致")
+
+        block_type = struct.unpack(endian + "I", block_type_raw)[0]
+        if block_type == 0x0A0D0D0A:
+            linktypes = {}
+            continue
+
+        if block_type == 0x00000001:  # Interface Description Block
+            if len(body) < 8:
+                raise PcapError("pcapng 接口描述块不完整")
+            interface_id = len(linktypes)
+            linktypes[interface_id] = struct.unpack(endian + "H", body[:2])[0]
+
+        elif block_type == 0x00000006:  # Enhanced Packet Block
+            if len(body) < 20:
+                raise PcapError("pcapng Enhanced Packet Block 不完整")
+            interface_id, _ts_high, _ts_low, captured_len, _original_len = struct.unpack(
+                endian + "IIIII", body[:20]
+            )
+            if captured_len > len(body) - 20:
+                raise PcapError("pcapng 包长度超出块边界")
+            if interface_id not in linktypes:
+                continue
+            yield linktypes[interface_id], body[20:20 + captured_len]
+
+        elif block_type == 0x00000002:  # legacy Packet Block
+            if len(body) < 20:
+                raise PcapError("pcapng Packet Block 不完整")
+            interface_id = struct.unpack(endian + "H", body[:2])[0]
+            captured_len = struct.unpack(endian + "I", body[12:16])[0]
+            if captured_len > len(body) - 20 or interface_id not in linktypes:
+                continue
+            yield linktypes[interface_id], body[20:20 + captured_len]
+
+        elif block_type == 0x00000003:  # Simple Packet Block
+            # 该块没有接口编号；只有一个接口时可以安全使用它。
+            if len(body) < 4 or len(linktypes) != 1:
+                continue
+            original_len = struct.unpack(endian + "I", body[:4])[0]
+            captured_len = min(original_len, len(body) - 4)
+            yield next(iter(linktypes.values())), body[4:4 + captured_len]
+
+
+def _iter_packets(input_file):
+    """自动识别 pcap/pcapng，并逐包返回 (链路类型, 原始帧)。"""
+    with open(input_file, "rb") as file_obj:
+        magic = file_obj.read(4)
+        file_obj.seek(0)
+        if magic in PCAP_MAGICS:
+            yield from _iter_classic_pcap(file_obj)
+        elif magic == PCAPNG_MAGIC:
+            yield from _iter_pcapng(file_obj)
+        else:
+            raise PcapError("无法识别文件格式，仅支持 pcap 和 pcapng")
+
+
+def _network_payload(frame, linktype):
+    """去掉链路层头，返回 (EtherType, 网络层数据)。"""
+    if linktype == 1:  # DLT_EN10MB, Ethernet
+        if len(frame) < 14:
+            return None
+        protocol = struct.unpack("!H", frame[12:14])[0]
+        offset = 14
+        # 处理 QinQ/802.1Q VLAN 标签。
+        while protocol in (0x8100, 0x88A8, 0x9100):
+            if len(frame) < offset + 4:
+                return None
+            protocol = struct.unpack("!H", frame[offset + 2:offset + 4])[0]
+            offset += 4
+        return protocol, frame[offset:]
+
+    if linktype in (0, 108):  # DLT_NULL / DLT_LOOP
+        if len(frame) < 4:
+            return None
+        version = frame[4] >> 4 if len(frame) > 4 else 0
+        protocol = 0x0800 if version == 4 else 0x86DD if version == 6 else None
+        return (protocol, frame[4:]) if protocol is not None else None
+
+    if linktype == 101:  # DLT_RAW
+        if not frame:
+            return None
+        version = frame[0] >> 4
+        protocol = 0x0800 if version == 4 else 0x86DD if version == 6 else None
+        return (protocol, frame) if protocol is not None else None
+
+    if linktype == 113:  # DLT_LINUX_SLL
+        return (struct.unpack("!H", frame[14:16])[0], frame[16:]) if len(frame) >= 16 else None
+
+    if linktype == 276:  # DLT_LINUX_SLL2
+        return (struct.unpack("!H", frame[:2])[0], frame[20:]) if len(frame) >= 20 else None
+
+    return None
+
+
+def _parse_udp(frame, linktype):
+    """解析 UDP，返回 (源 IP, 目的 IP, 源端口, 目的端口, 负载)。"""
+    network = _network_payload(frame, linktype)
+    if network is None:
+        return None
+    protocol, data = network
+
+    if protocol == 0x0800:  # IPv4
+        if len(data) < 20 or data[0] >> 4 != 4:
+            return None
+        header_len = (data[0] & 0x0F) * 4
+        if header_len < 20 or len(data) < header_len:
+            return None
+        total_len = struct.unpack("!H", data[2:4])[0]
+        if total_len < header_len:
+            return None
+        packet_end = min(len(data), total_len)
+        # 非首个 IPv4 分片没有 UDP 头。
+        fragment_offset = struct.unpack("!H", data[6:8])[0] & 0x1FFF
+        if data[9] != 17 or fragment_offset or packet_end < header_len + 8:
+            return None
+        source = ipaddress.IPv4Address(data[12:16])
+        destination = ipaddress.IPv4Address(data[16:20])
+        udp = data[header_len:packet_end]
+
+    elif protocol == 0x86DD:  # IPv6
+        if len(data) < 40 or data[0] >> 4 != 6:
+            return None
+        source = ipaddress.IPv6Address(data[8:24])
+        destination = ipaddress.IPv6Address(data[24:40])
+        next_header = data[6]
+        offset = 40
+        payload_length = struct.unpack("!H", data[4:6])[0]
+        packet_end = min(len(data), 40 + payload_length) if payload_length else len(data)
+        # 跳过常见 IPv6 扩展头，直到 UDP。
+        while next_header != 17:
+            if next_header in (0, 43, 60):  # Hop-by-Hop, Routing, Destination
+                if offset + 2 > packet_end:
+                    return None
+                extension_len = (data[offset + 1] + 1) * 8
+            elif next_header == 44:  # Fragment
+                if offset + 8 > packet_end:
+                    return None
+                fragment_field = struct.unpack("!H", data[offset + 2:offset + 4])[0]
+                if fragment_field & 0xFFF8:
+                    return None
+                extension_len = 8
+            elif next_header == 51:  # Authentication Header
+                if offset + 2 > packet_end:
+                    return None
+                extension_len = (data[offset + 1] + 2) * 4
+            else:  # ESP、TCP 等无法继续解析为 UDP
+                return None
+            if offset + extension_len > packet_end:
+                return None
+            next_header = data[offset]
+            offset += extension_len
+        if offset + 8 > packet_end:
+            return None
+        udp = data[offset:packet_end]
+
+    else:
+        return None
+
+    source_port, destination_port, udp_len = struct.unpack("!HHH", udp[:6])
+    if udp_len < 8:
+        return None
+    payload_end = min(len(udp), udp_len)
+    return source, destination, source_port, destination_port, udp[8:payload_end]
 
 
 def _detect_format(input_file):
     """按文件头识别格式，返回 'pcap' / 'pcapng'；无法识别返回 None。"""
     if os.path.isdir(input_file):
-        raise ValueError(f"输入是目录而不是文件: {input_file}")
+        raise PcapError(f"输入是目录而不是文件: {input_file}")
     with open(input_file, "rb") as file_obj:
         magic = file_obj.read(4)
     if not magic:
-        raise ValueError("文件为空")
+        raise PcapError("文件为空")
     if magic in PCAP_MAGICS:
         return "pcap"
     if magic == PCAPNG_MAGIC:
@@ -181,17 +435,8 @@ def _discard_temp(temp_file, output_file):
         pass
 
 
-def _udp_payload(udp):
-    """取 UDP 负载，并按 UDP 头声明长度裁掉链路层填充。"""
-    payload = bytes(udp.payload)
-    declared = udp.len
-    if declared is not None and declared >= 8:
-        payload = payload[:declared - 8]
-    return payload
-
-
 def extract_udp_payload(input_file, output_file, filters, ts_check=True):
-    """使用 Scapy 提取 UDP 负载，可按源/目的 IP 和端口过滤。"""
+    """提取 UDP 负载，可按源/目的 IP 和端口过滤，并按需做 TS 自检。"""
     try:
         matcher = _build_matcher(filters)
     except ValueError as exc:
@@ -207,20 +452,11 @@ def extract_udp_payload(input_file, output_file, filters, ts_check=True):
         return False
     try:
         file_format = _detect_format(input_file)
-    except (OSError, ValueError) as exc:
+    except (OSError, PcapError) as exc:
         print(f"[错误] {exc}")
         return False
     if file_format is None:
         print("[错误] 无法识别文件格式，仅支持 pcap 和 pcapng")
-        return False
-
-    try:
-        from scapy.layers.inet import IP, UDP
-        from scapy.layers.inet6 import IPv6
-        from scapy.utils import PcapReader
-    except ImportError:
-        print("[错误] 缺少scapy库，请执行: pip install scapy")
-        print("[提示] 或改用无依赖版本: python3 pcap_extractor_v2.py")
         return False
 
     count_total = 0
@@ -236,36 +472,31 @@ def extract_udp_payload(input_file, output_file, filters, ts_check=True):
 
     temp_file = _temp_path(output_file)
     try:
-        with PcapReader(input_file) as pcap, open(temp_file, "wb") as output:
-            for packet in pcap:
+        with open(temp_file, "wb") as output:
+            for linktype, frame in _iter_packets(input_file):
                 count_total += 1
                 if count_total % 10000 == 0:
                     print(
                         f"  已处理 {count_total} 包, UDP {count_udp}, 匹配 {count_matched}",
                         end="\r",
                     )
-                if UDP not in packet:
-                    continue
-                network = packet[IP] if IP in packet else packet[IPv6] if IPv6 in packet else None
-                if network is None:
+                parsed = _parse_udp(frame, linktype)
+                if parsed is None:
                     continue
                 count_udp += 1
-                udp = packet[UDP]
-                source = ipaddress.ip_address(network.src)
-                destination = ipaddress.ip_address(network.dst)
-                if not matcher(source, destination, udp.sport, udp.dport):
+                source, destination, source_port, destination_port, payload = parsed
+                if not matcher(source, destination, source_port, destination_port):
                     continue
-                payload = _udp_payload(udp)
                 output.write(payload)
                 if checker is not None:
                     checker.feed(payload)
                 count_matched += 1
 
         if count_total == 0:
-            raise ValueError("未从文件中解析到任何数据包（文件可能为空或被截断）")
+            raise PcapError("未从文件中解析到任何数据包（文件可能为空或被截断）")
         if temp_file != output_file:
             os.replace(temp_file, output_file)
-    except Exception as exc:  # scapy 各版本异常类型不统一，统一兜底
+    except (OSError, PcapError, struct.error) as exc:
         _discard_temp(temp_file, output_file)
         print(f"[错误] {exc}")
         return False
@@ -324,7 +555,7 @@ HELP_TEMPLATE = """用法: python3 {script} [-i <输入>] [-o <输出>] [过滤�
   · 默认做 188 字节对齐自检，异常时打印 [警告] 并给出排查建议
 
 依赖:
-  scapy（pip install scapy）；无依赖且更快的版本见 pcap_extractor_v2.py
+  Python 标准库（无需额外安装）；数据量大时本脚本快于 pcap_extractor.py
 
 退出码:
   0 成功（含 [警告]）    1 参数错误 / 文件不存在 / 格式无法识别

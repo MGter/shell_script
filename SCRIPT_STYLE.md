@@ -188,8 +188,25 @@ if not os.path.exists(args.input):
 | | `-t <间隔>` | float | 配置: PCAP循环间隔秒数 (默认: 1.0) |
 | | `--preserve-timing` | flag | 配置: PCAP保留原始时序 |
 | | `-h` | flag | 显示帮助 |
-| `pcap_extractor.py` | `-i <文件>` | filepath(.pcap) | 输入: PCAP文件 |
-| | `-o <文件>` | filepath(.ts) | 输出: 提取的TS文件 |
+| `pcap_extractor.py` | `-i, --input <文件>` | filepath(.pcap/.pcapng) | 输入: PCAP文件 (必选) |
+| | `-o, --output <文件>` | filepath(.ts) | 输出: 提取的TS文件 (默认: output.ts) |
+| | `--ip <IP列表>` | IP列表 | 过滤: 源或目的IP，逗号分隔/可重复 |
+| | `--src-ip <IP列表>` | IP列表 | 过滤: 仅源IP |
+| | `--dst-ip <IP列表>` | IP列表 | 过滤: 仅目的IP |
+| | `-p, --port <端口列表>` | port列表 | 过滤: 源或目的端口，逗号分隔/可重复 |
+| | `--sport <端口列表>` | port列表 | 过滤: 仅源端口 |
+| | `--dport <端口列表>` | port列表 | 过滤: 仅目的端口 |
+| | `--no-ts-check` | flag | 配置: 关闭TS 188字节对齐自检 |
+| | `-h` | flag | 显示帮助 |
+| `pcap_extractor_v2.py` | `-i, --input <文件>` | filepath(.pcap/.pcapng) | 输入: PCAP文件 (必选) |
+| | `-o, --output <文件>` | filepath(.ts) | 输出: 提取的TS文件 (默认: output.ts) |
+| | `--ip <IP列表>` | IP列表 | 过滤: 源或目的IP，逗号分隔/可重复 |
+| | `--src-ip <IP列表>` | IP列表 | 过滤: 仅源IP |
+| | `--dst-ip <IP列表>` | IP列表 | 过滤: 仅目的IP |
+| | `-p, --port <端口列表>` | port列表 | 过滤: 源或目的端口，逗号分隔/可重复 |
+| | `--sport <端口列表>` | port列表 | 过滤: 仅源端口 |
+| | `--dport <端口列表>` | port列表 | 过滤: 仅目的端口 |
+| | `--no-ts-check` | flag | 配置: 关闭TS 188字节对齐自检 |
 | | `-h` | flag | 显示帮助 |
 | `set_policy_routing.py` | `<网卡>` | interface | 目标: 配置源策略路由的网卡 |
 | | `[表ID]` | integer(1-252) | 配置: 策略路由表 ID (默认: 203) |

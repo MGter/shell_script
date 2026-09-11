@@ -13,7 +13,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `ffmpeg_push.sh` - ffmpeg多端口UDP推流，支持循环推流和端口递增
 - `udp_sender.py` - UDP发送工具，支持TS流按码率发送和PCAP回放
 - `multi_cap_parser.py` - 多端口并行抓包+TS流时间戳解析对比
-- `pcap_extractor.py` - 从PCAP文件提取UDP负载保存为TS
+- `pcap_extractor.py` - 从PCAP文件提取UDP负载保存为TS（Scapy版本）
+- `pcap_extractor_v2.py` - 从PCAP文件提取UDP负载保存为TS（标准库版本，更快且无依赖，优先使用）
+  两者命令行参数一致：按源/目的 IP 与端口过滤（逗号分隔列表），输出做 TS 188 字节对齐自检
 
 ### 系统运维工具 (sysadmin_tools/)
 - `sysinfo_checker.py` - 综合系统信息检查，收集OS、CPU、内存、磁盘、网卡、GPU、进程等状态，输出JSON文件

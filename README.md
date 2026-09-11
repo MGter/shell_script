@@ -18,7 +18,8 @@ shell_script/
 │   ├── ffmpeg_push.sh       # ffmpeg多端口UDP推流
 │   ├── udp_sender.py        # UDP发送工具(TS流/PCAP回放)
 │   ├── multi_cap_parser.py  # 多端口并行抓包+TS流解析
-│   ├── pcap_extractor.py    # PCAP提取UDP负载
+│   ├── pcap_extractor.py    # PCAP提取UDP负载（Scapy版本）
+│   ├── pcap_extractor_v2.py # PCAP提取UDP负载（标准库版本）
 │   ├── frame_fingerprint.py # 逐帧内容指纹对比(TS)
 │   └── set_policy_routing.py # IPv4源策略路由设置
 │
@@ -98,11 +99,35 @@ python3 udp_sender.py -f input.pcap -i 127.0.0.1 -p 5000 --preserve-timing
 python3 multi_cap_parser.py -i 192.168.1.1 -p 30000,30001,30002 -d 10
 ```
 
-**pcap_extractor.py** - 提取PCAP中的UDP负载
+**pcap_extractor.py** - 提取PCAP中的UDP负载（Scapy版本）
 ```bash
 # 从PCAP提取UDP数据保存为TS
 python3 pcap_extractor.py -i input.pcap -o output.ts
+
+# 按源或目的 IP、端口过滤（逗号分隔，参数可重复）
+python3 pcap_extractor.py -i input.pcap -o output.ts --ip 192.168.1.10 --port 5000
 ```
+
+**pcap_extractor_v2.py** - 无第三方依赖的PCAP UDP负载提取
+```bash
+# 基础提取
+python3 pcap_extractor_v2.py -i input.pcap -o output.ts
+
+# 单向流提取：只要"发给某台设备"的包（避免混入反向包导致TS错位）
+python3 pcap_extractor_v2.py -i input.pcap -o to31.ts --dst-ip 10.10.40.31 --dport 23233
+
+# 多端口 / 多设备（逗号分隔，参数也可重复）
+python3 pcap_extractor_v2.py -i input.pcap -o multi.ts -p 23233,23234,23235
+python3 pcap_extractor_v2.py -i input.pcap -o two.ts --ip 10.10.40.31,10.10.40.32
+```
+
+两个脚本参数完全一致，输出均为命中包的 UDP 负载按抓包顺序拼接（自动裁掉以太网最小帧填充）：
+
+- 过滤选项之间是"与"关系，同一选项内多个值是"或"关系；`--ip` / `-p` 为源或目的双向匹配，
+  只要单向流请用 `--src-ip` / `--dst-ip` / `--sport` / `--dport`
+- 输出先写 `<输出>.part` 再原子替换，出错时保留原有输出文件
+- 默认做 MPEG-TS 188 字节对齐自检，混入其他流时打印 `[警告]` 并提示排查方向
+- 无参数或 `-h` 显示帮助，帮助内含完整操作手册
 
 **frame_fingerprint.py** - 逐帧内容指纹对比
 ```bash
@@ -166,6 +191,7 @@ python3 image_measurer.py -i photo.jpg
 | udp_sender.py | scapy (仅PCAP模式) |
 | multi_cap_parser.py | tcpdump, ffprobe, scapy |
 | pcap_extractor.py | scapy |
+| pcap_extractor_v2.py | Python 标准库（无需额外安装） |
 | frame_fingerprint.py | ffmpeg, ffprobe |
 | set_policy_routing.py | iproute2 (`ip`), procps (`sysctl`)，需root |
 | image_measurer.py | opencv-python, numpy |
