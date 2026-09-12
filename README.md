@@ -132,13 +132,19 @@ python3 pcap_extractor_v2.py -i input.pcap -o two.ts --ip 10.10.40.31,10.10.40.3
 **frame_fingerprint.py** - 逐帧内容指纹对比
 ```bash
 # 计算两个TS文件每帧指纹(dHash+亮度)并绘制对比SVG
-python3 frame_fingerprint.py -f a.ts -f b.ts -o compare.svg
+python3 network_tools/frame_fingerprint.py -f a.ts -f b.ts -o compare.svg
 # 交互式可缩放图(滚轮缩放/拖拽平移/比例尺)
-python3 frame_fingerprint.py -f a.ts -f b.ts -o compare.html
+python3 network_tools/frame_fingerprint.py -f a.ts -f b.ts -o compare.html
 # 单文件出图 / 快速预览前200帧
-python3 frame_fingerprint.py -f a.ts -o single.svg
-python3 frame_fingerprint.py -f a.ts -f b.ts -n 200
+python3 network_tools/frame_fingerprint.py -f a.ts -o single.svg
+python3 network_tools/frame_fingerprint.py -f a.ts -f b.ts -n 200
+# 通过命令行给 A/B 时间轴增加偏移（单位毫秒）
+python3 network_tools/frame_fingerprint.py -f a.ts -f b.ts \
+  --shift-a-ms 12.5 --shift-b-ms 0 -o compare.html
 ```
+
+脚本会在每个输入文件旁生成 `<输入文件>.fingerprint.csv`，其中 `pts_time`
+为秒；`-n` 必须是正整数，省略时处理全部帧。
 
 ---
 
@@ -184,6 +190,8 @@ python3 image_measurer.py -i photo.jpg
 ---
 
 ## 依赖说明
+
+最低 Python 版本要求：Python 3.6。
 
 | 脚本 | 依赖 |
 |------|------|

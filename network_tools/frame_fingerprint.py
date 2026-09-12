@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-逐帧内容指纹对比工具 - 计算两个TS文件每帧指纹(dHash感知哈希+亮度)，绘制对比SVG
+逐帧内容指纹对比工具 - 计算一个或两个TS文件的逐帧指纹(dHash感知哈希+亮度)，绘制对比SVG
+兼容 Python 3.6 及以上版本。
 依赖: ffmpeg / ffprobe
 """
 
 import sys
 import json
+import math
 import subprocess
+
+
+class ToolError(RuntimeError):
+    """外部工具或输入数据处理失败。"""
 
 
 def show_help():
@@ -16,13 +22,17 @@ def show_help():
 选项:
   -f <文件>  输入: TS文件路径，可指定一个或两个 (必选; 一个出单路图, 两个出对比图)
   -o <文件>  输出: 指纹图文件; .html为可缩放交互图(滚轮缩放/拖拽/比例尺), .svg为静态图 (默认: fingerprint_compare.svg)
-  -n <帧数>  配置: 最多处理前N帧，用于快速预览 (默认: 全部)
+  -n <帧数>  配置: 最多处理前N帧，用于快速预览 (正整数; 默认: 全部)
+  --shift-a-ms <毫秒>  配置: File A横向偏移; 正值向右/时间变晚，负值向左/时间变早 (默认: 0)
+  --shift-b-ms <毫秒>  配置: File B横向偏移; 正值向右/时间变晚，负值向左/时间变早 (默认: 0)
   -h         显示帮助信息
 
 说明:
   对每帧缩放为 9x8 灰度计算 64 位 dHash 感知哈希 + 亮度均值
+  横轴使用 ffprobe 返回的 PTS 时间(秒)，不假定输入流一定使用 90kHz time base
   同一画面指纹一致(对编码参数差异鲁棒); 内容对齐则两条曲线重叠,
-  有偏移/丢帧/重建时曲线错开或出现缺口。
+  有偏移/丢帧/重建时曲线错开或出现缺口。每个输入还会生成同目录下的
+  <输入文件>.fingerprint.csv，保存逐帧指纹数据。
 
 示例:
   python3 frame_fingerprint.py -f 20002.ts -f 20003.ts -o compare.svg
@@ -34,33 +44,72 @@ def show_help():
 config = {
     "width": 9,               # 灰度块宽度
     "height": 8,              # 灰度块高度
-    "pts_jump_threshold": 10000,  # PTS跳变检测阈值(90kHz)
+    "pts_jump_threshold": 0.1,    # PTS跳变检测阈值(秒)
 }
 
 
+def _command_detail(stderr):
+    """提取外部命令的可读错误信息。"""
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", errors="replace")
+    return (stderr or "").strip() or "无错误信息"
+
+
 def ffprobe_pts(file_path):
-    """获取视频每帧原始PTS(解码序, 90kHz)"""
-    p = subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_frames",
-         "-show_entries", "frame=pts", "-of", "json", file_path],
-        capture_output=True, text=True)
+    """获取视频每帧 PTS 时间(秒)，并保留没有时间戳的帧位置。"""
+    try:
+        p = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_frames",
+             "-show_entries", "frame=pts_time,best_effort_timestamp_time", "-of", "json", file_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            universal_newlines=True, check=False)
+    except OSError as exc:
+        raise ToolError(f"调用 ffprobe 失败: {exc}") from exc
+    if p.returncode != 0:
+        raise ToolError(f"ffprobe 读取 {file_path} 失败: {_command_detail(p.stderr)}")
     try:
         data = json.loads(p.stdout)
-    except Exception as e:
-        print(f"[错误] 解析PTS失败: {e}")
-        return []
-    return [f["pts"] for f in data.get("frames", []) if "pts" in f]
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ToolError(f"解析 {file_path} 的 PTS 失败: {exc}") from exc
+
+    timestamps = []
+    if not isinstance(data, dict):
+        raise ToolError(f"解析 {file_path} 的 PTS 失败: JSON 根节点不是对象")
+    frames = data.get("frames", [])
+    if not isinstance(frames, list):
+        raise ToolError(f"解析 {file_path} 的 PTS 失败: frames 不是数组")
+    for frame in frames:
+        if not isinstance(frame, dict):
+            timestamps.append(None)
+            continue
+        value = frame.get("pts_time")
+        if value is None:
+            value = frame.get("best_effort_timestamp_time")
+        if value is None or value == "N/A":
+            timestamps.append(None)
+            continue
+        try:
+            timestamp = float(value)
+            timestamps.append(timestamp if math.isfinite(timestamp) else None)
+        except (TypeError, ValueError):
+            timestamps.append(None)
+    return timestamps
 
 
 def ffmpeg_gray(file_path):
     """用ffmpeg把每帧缩放到灰度块并输出(-fps_mode vfr保证与ffprobe帧数一致)"""
-    p = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-v", "error", "-i", file_path,
-         "-map", "0:v:0",
-         "-vf", f"scale={config['width']}:{config['height']},format=gray",
-         "-fps_mode", "vfr",
-         "-f", "rawvideo", "-pix_fmt", "gray", "-"],
-        capture_output=True)
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostdin", "-v", "error", "-i", file_path,
+             "-map", "0:v:0",
+             "-vf", f"scale={config['width']}:{config['height']},format=gray",
+             "-fps_mode", "vfr",
+             "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    except OSError as exc:
+        raise ToolError(f"调用 ffmpeg 失败: {exc}") from exc
+    if p.returncode != 0:
+        raise ToolError(f"ffmpeg 解码 {file_path} 失败: {_command_detail(p.stderr)}")
     return p.stdout
 
 
@@ -81,41 +130,64 @@ def blocks_hashes(raw):
 
 
 def fingerprints(file_path, max_frames):
-    """计算一个文件每帧指纹: [(pts, 序号, dhash, luma)]"""
+    """计算一个文件每帧指纹: [(pts_time秒, 序号, dhash, luma)]"""
+    if max_frames is not None and max_frames <= 0:
+        raise ValueError("最大帧数必须是正整数")
     pts = ffprobe_pts(file_path)
     raw = ffmpeg_gray(file_path)
     hashes = blocks_hashes(raw)
     n = min(len(pts), len(hashes))
     if len(pts) != len(hashes):
         print(f"[警告] {file_path}: PTS帧数={len(pts)} 灰度帧数={len(hashes)}，按{n}对齐")
-    if max_frames and n > max_frames:
+    if max_frames is not None and n > max_frames:
         n = max_frames
-    return [(pts[i], i, hashes[i][0], hashes[i][1]) for i in range(n)]
+    rows = []
+    missing_pts = 0
+    for i in range(n):
+        if pts[i] is None:
+            missing_pts += 1
+            continue
+        rows.append((pts[i], i, hashes[i][0], hashes[i][1]))
+    if missing_pts:
+        print(f"[警告] {file_path}: {missing_pts} 帧没有有效PTS，已跳过")
+    return rows
 
 
 def write_csv(file_path, rows):
-    """写CSV: pts,index,dhash,luma"""
+    """写CSV: pts_time,index,dhash,luma"""
     out_file = file_path + ".fingerprint.csv"
-    with open(out_file, "w") as f:
-        f.write("pts,index,dhash,luma\n")
+    with open(out_file, "w", encoding="utf-8", newline="") as f:
+        f.write("pts_time,index,dhash,luma\n")
         for pts, idx, dh, luma in rows:
-            f.write(f"{pts},{idx},{dh},{luma:.3f}\n")
+            f.write(f"{pts:.6f},{idx},{dh},{luma:.3f}\n")
     print(f"[输出] CSV: {out_file}")
 
 
-def svg_compare(a, b, out_file):
+def _hash_ratio(value):
+    """把 dHash 映射到 [0, 1]，使全 1 哈希也能落在坐标轴上。"""
+    bits = config["height"] * (config["width"] - 1)
+    max_value = (1 << bits) - 1
+    return value / max_value if max_value else 0.0
+
+
+def svg_compare(a, b, out_file, shift_a_ms=0.0, shift_b_ms=0.0):
     """画指纹对比SVG(一个或两个文件; b为空则只画文件A)"""
-    p0 = a[0][0] if not b else min(a[0][0], b[0][0])
+    if not a:
+        print("[错误] File A 没有有效视频帧")
+        return False
+    p0 = min(row[0] for row in a + (b or []))
+    shift_a = shift_a_ms / 1000.0
+    shift_b = shift_b_ms / 1000.0
 
-    def to_series(rows):
-        return [((p - p0) / 90000.0, h / 2**64, luma / 255.0) for (p, i, h, luma) in rows]
+    def to_series(rows, shift=0.0):
+        return [(p - p0 + shift, _hash_ratio(h), luma / 255.0) for (p, i, h, luma) in rows]
 
-    sa = to_series(a)
-    sb = to_series(b) if b else []
+    sa = to_series(a, shift_a)
+    sb = to_series(b, shift_b) if b else []
     xs = [x for (x, _, _) in sa] + [x for (x, _, _) in sb]
     if not xs:
         print("[错误] 无有效数据")
-        return
+        return False
 
     xmin, xmax = min(xs), max(xs)
     W, H = 1500, 560
@@ -158,33 +230,39 @@ def svg_compare(a, b, out_file):
         parts.append(poly2([(x, z) for (x, _, z) in sb], "#9bc7e8"))
     ly = B + 22
     parts.append(f'<rect x="{L}" y="{ly}" width="10" height="10" fill="#c0392b"/>')
-    parts.append(f'<text x="{L+16}" y="{ly+10}" font-size="12" font-family="Arial">File A dHash</text>')
+    parts.append(f'<text x="{L+16}" y="{ly+10}" font-size="12" font-family="Arial">File A dHash (偏移 {shift_a_ms:+g} ms)</text>')
     if sb:
         parts.append(f'<rect x="{L+150}" y="{ly}" width="10" height="10" fill="#2980b9"/>')
-        parts.append(f'<text x="{L+166}" y="{ly+10}" font-size="12" font-family="Arial">File B dHash (虚线)</text>')
+        parts.append(f'<text x="{L+166}" y="{ly+10}" font-size="12" font-family="Arial">File B dHash (虚线, 偏移 {shift_b_ms:+g} ms)</text>')
     parts.append(f'<text x="{L+360}" y="{ly+10}" font-size="12" fill="#888" font-family="Arial">细线=亮度: A #e8a49b' + (' B #9bc7e8' if sb else '') + '</text>')
     parts.append("</svg>")
-    with open(out_file, "w") as f:
+    with open(out_file, "w", encoding="utf-8") as f:
         f.write("\n".join(parts))
     print(f"[输出] SVG: {out_file}")
+    return True
 
 
-def html_viewer(a, b, out_file):
+def html_viewer(a, b, out_file, shift_a_ms=0.0, shift_b_ms=0.0):
     """生成可缩放/平移/带比例尺的交互式 HTML 指纹图"""
-    p0 = a[0][0] if not b else min(a[0][0], b[0][0])
+    if not a:
+        print("[错误] File A 没有有效视频帧")
+        return False
+    p0 = min(row[0] for row in a + (b or []))
 
     def to_series(rows):
-        return [[(p - p0) / 90000.0, h / 2**64, luma / 255.0] for (p, i, h, luma) in rows]
+        return [[p - p0, _hash_ratio(h), luma / 255.0] for (p, i, h, luma) in rows]
 
     sa = to_series(a)
     sb = to_series(b) if b else []
     if not sa:
         print("[错误] 无有效数据")
-        return
+        return False
 
     js = (
         "const DATA_A = " + json.dumps(sa) + ";\n"
         "const DATA_B = " + json.dumps(sb) + ";\n"
+        "const INITIAL_SHIFT_A_MS = " + json.dumps(float(shift_a_ms)) + ";\n"
+        "const INITIAL_SHIFT_B_MS = " + json.dumps(float(shift_b_ms)) + ";\n"
     )
 
     html = """<!DOCTYPE html>
@@ -198,7 +276,7 @@ def html_viewer(a, b, out_file):
   .hint { font-size: 13px; color: #777; margin-bottom: 6px; }
   #chart { position: relative; width: 100%; max-width: 1500px; background: #fff;
            border: 1px solid #e0dbd3; border-radius: 8px; overflow: hidden; }
-  svg { display: block; width: 100%; height: 560px; touch-action: none; }
+  svg { display: block; width: 100%; height: 560px; touch-action: none; background: #fff; }
   #tooltip { position: absolute; pointer-events: none; background: rgba(0,0,0,.78);
              color: #fff; padding: 6px 9px; border-radius: 6px; font-size: 12px; display: none;
              white-space: pre; }
@@ -209,14 +287,26 @@ def html_viewer(a, b, out_file):
   #controls { margin: 6px 0; font-size: 12px; color: #555; }
   button { margin-right: 8px; }
   .lg { font-size: 12px; margin-top: 4px; }
+  .shift-controls { font-size: 12px; color: #555; margin: 6px 0; }
+  .shift-controls label { margin-right: 4px; }
+  .shift-controls input { width: 76px; margin-left: 2px; }
+  .shift-controls button { margin-right: 4px; }
 </style>
 </head>
 <body>
 <h1>Frame Fingerprint Viewer</h1>
 <div class="hint">滚轮=缩放(x轴), 拖拽=平移, 悬停=查看数值; 底部比例尺随缩放更新</div>
 <div id="controls"><button onclick="resetView()">重置视图</button><span id="viewinfo"></span></div>
+<div class="shift-controls">
+  横向偏移（正值向右/时间变晚，负值向左/时间变早）：
+  <label>A <input id="shiftA" type="number" step="0.1" value="0" oninput="setShift('a', this.value)"> ms</label>
+  <button onclick="nudge('a', -1)">A −1 ms</button><button onclick="nudge('a', 1)">A +1 ms</button>
+  <label>B <input id="shiftB" type="number" step="0.1" value="0" oninput="setShift('b', this.value)"> ms</label>
+  <button onclick="nudge('b', -1)">B −1 ms</button><button onclick="nudge('b', 1)">B +1 ms</button>
+  <button onclick="resetShifts()">偏移归零</button>
+</div>
 <div id="chart">
-  <svg id="svg"></svg>
+  <svg id="svg" viewBox="0 0 1500 560" width="100%" height="560"></svg>
   <div id="scalebar"><span id="scalebarLabel"></span></div>
   <div id="tooltip"></div>
   <div class="lg">红=FileA(dHash) 蓝=FileB(dHash,虚线); 细线=亮度</div>
@@ -225,20 +315,39 @@ def html_viewer(a, b, out_file):
 """ + js + """
 const W=1500, H=560, L=90, R=1480, T=48, B=500, sp=0.55;
 let view = {x0:null, x1:null};
+let shiftMs = {a:INITIAL_SHIFT_A_MS, b:INITIAL_SHIFT_B_MS};
+function shiftSec(which){ return shiftMs[which] / 1000.0; }
+function shiftedX(p, which){ return p[0] + shiftSec(which); }
+function dataExtent(){
+  let x0=Infinity, x1=-Infinity;
+  const visit=(series,which)=>{
+    for (const p of series){
+      const x=shiftedX(p,which);
+      if (x < x0) x0=x;
+      if (x > x1) x1=x;
+    }
+  };
+  visit(DATA_A,"a"); visit(DATA_B,"b");
+  return {x0,x1};
+}
 (function init(){
-  let xs = DATA_A.map(p=>p[0]);
-  if (DATA_B.length) xs = xs.concat(DATA_B.map(p=>p[0]));
-  view.x0 = Math.min(...xs); view.x1 = Math.max(...xs);
+  document.getElementById("shiftA").value = shiftMs.a;
+  document.getElementById("shiftB").value = shiftMs.b;
+  const extent = dataExtent();
+  if (!Number.isFinite(extent.x0) || !Number.isFinite(extent.x1)) { view.x0 = 0; view.x1 = 1; }
+  else { view.x0 = extent.x0; view.x1 = extent.x1; }
+  if (!(view.x1 > view.x0)) view.x1 = view.x0 + 1;
   render();
 })();
 function x2px(x){ return L + (x-view.x0)/(view.x1-view.x0 || 1)*(R-L); }
 function y2dh(y){ return T + (1-y)*(B-T)*sp; }
 function y2lu(y){ return T + (B-T)*sp + (1-y)*(B-T)*(1-sp); }
-function polyFrom(series, yfn){
+function polyFrom(series, yfn, which){
   const pts=[];
   for (const p of series){
-    if (p[0] < view.x0 || p[0] > view.x1) continue;
-    pts.push([x2px(p[0]).toFixed(1), yfn(p).toFixed(1)]);
+    const x=shiftedX(p,which);
+    if (x < view.x0 || x > view.x1) continue;
+    pts.push([x2px(x).toFixed(1), yfn(p).toFixed(1)]);
   }
   return pts.map(q=>q.join(",")).join(" ");
 }
@@ -265,45 +374,72 @@ function render(){
   // curves
   if(DATA_A.length){
     svg.appendChild(el("polyline",{fill:"none",stroke:"#c0392b","stroke-width":1.3,
-      points:polyFrom(DATA_A,p=>y2dh(p[1]))}));
+      points:polyFrom(DATA_A,p=>y2dh(p[1]),"a")}));
     svg.appendChild(el("polyline",{fill:"none",stroke:"#e8a49b","stroke-width":1,
-      points:polyFrom(DATA_A,p=>y2lu(p[2]))}));
+      points:polyFrom(DATA_A,p=>y2lu(p[2]),"a")}));
   }
   if(DATA_B.length){
     svg.appendChild(el("polyline",{fill:"none",stroke:"#2980b9","stroke-width":1.3, "stroke-dasharray":"5,3",
-      points:polyFrom(DATA_B,p=>y2dh(p[1]))}));
+      points:polyFrom(DATA_B,p=>y2dh(p[1]),"b")}));
     svg.appendChild(el("polyline",{fill:"none",stroke:"#9bc7e8","stroke-width":1,
-      points:polyFrom(DATA_B,p=>y2lu(p[2]))}));
+      points:polyFrom(DATA_B,p=>y2lu(p[2]),"b")}));
   }
-  // scale bar (目标: 10 等分的刻度)
+  // scale bar (约 10 等分，支持缩放到毫秒/微秒范围)
   const range=view.x1-view.x0;
-  const stepNice=[60*60*24,60*60,60,10,5,2,1,0.5,0.2,0.1,0.05,0.02,0.01].find(s=>range/s<=13)||0.01;
-  const ticks=Math.round(range/stepNice);
+  function niceStep(value){
+    if (!(value>0) || !Number.isFinite(value)) return 1;
+    const raw=value/10, exponent=Math.pow(10,Math.floor(Math.log10(raw)));
+    const normalized=raw/exponent;
+    const base=normalized<=1 ? 1 : normalized<=2 ? 2 : normalized<=5 ? 5 : 10;
+    return base*exponent;
+  }
+  function formatNumber(value){ return Number(value.toPrecision(3)).toString(); }
+  function formatStep(value){
+    if (value>=1) return formatNumber(value)+" s";
+    if (value>=0.001) return formatNumber(value*1000)+" ms";
+    return formatNumber(value*1000000)+" μs";
+  }
+  const stepNice=niceStep(range);
+  const ticks=Math.max(1,Math.round(range/stepNice));
   const bar=document.getElementById("scalebar");
   const pxW=Math.round((R-L)/ticks);
   bar.innerHTML="";
   bar.style.width=pxW+"px";
   bar.style.height="12px";
   bar.style.border="1px solid #666"; bar.style.borderLeft="1px solid #666";
-  const lab=document.createElement("span"); lab.textContent=stepNice>=1? stepNice+" s":(stepNice*1000)+" ms";
+  const lab=document.createElement("span"); lab.textContent=formatStep(stepNice);
   bar.appendChild(lab);
   document.getElementById("viewinfo").textContent=
-    "  [视图] "+view.x0.toFixed(2)+" ~ "+view.x1.toFixed(2)+" s (共 "+(view.x1-view.x0).toFixed(2)+" s), 每格 "+stepNice+" s";
+    "  [视图] "+view.x0.toFixed(2)+" ~ "+view.x1.toFixed(2)+" s (共 "+(view.x1-view.x0).toFixed(2)+" s), 每格 "+formatStep(stepNice)+
+    "；偏移 A="+shiftMs.a.toFixed(1)+" ms, B="+shiftMs.b.toFixed(1)+" ms";
   // tooltip mouse move
   svg.onmousemove=e=>{ const rect=svg.getBoundingClientRect();
     const px=(e.clientX-rect.left)/rect.width*W;
     const xv=view.x0+(px-L)/(R-L)*(view.x1-view.x0);
     let txt="x="+xv.toFixed(3)+" s\\n";
-    const find=(data)=>data.reduce((best,p)=>Math.abs(p[0]-xv)<Math.abs(best[0]-xv)?p:best,null);
-    const a=find(DATA_A), b=find(DATA_B);
-    if(a) txt+="A dhash="+a[1].toFixed(3)+" luma="+a[2].toFixed(3)+"\\n";
-    if(b) txt+="B dhash="+b[1].toFixed(3)+" luma="+b[2].toFixed(3);
+    const find=(data,which)=>{let best=null; for(const p of data){ if(best===null||Math.abs(shiftedX(p,which)-xv)<Math.abs(shiftedX(best,which)-xv)) best=p;} return best;};
+    const a=find(DATA_A,"a"), b=find(DATA_B,"b");
+    if(a) txt+="A t="+shiftedX(a,"a").toFixed(3)+" s dhash="+a[1].toFixed(3)+" luma="+a[2].toFixed(3)+"\\n";
+    if(b) txt+="B t="+shiftedX(b,"b").toFixed(3)+" s dhash="+b[1].toFixed(3)+" luma="+b[2].toFixed(3);
     const tip=document.getElementById("tooltip");
     tip.style.display="block";
     tip.style.left=(e.clientX-rect.left+14)+"px"; tip.style.top=(e.clientY-rect.top-10)+"px";
     tip.textContent=txt;
   };
   svg.onmouseleave=()=>{document.getElementById("tooltip").style.display="none";};
+}
+function setShift(which, value){
+  const v=Number(value);
+  if(!Number.isFinite(v)) return;
+  shiftMs[which]=v;
+  document.getElementById("shift"+which.toUpperCase()).value=v;
+  render();
+}
+function nudge(which, delta){ setShift(which, shiftMs[which]+delta); }
+function resetShifts(){
+  setShift("a",0);
+  setShift("b",0);
+  resetView();
 }
 // zoom on wheel (以鼠标为中心缩放 x)
 document.getElementById("svg").addEventListener("wheel",e=>{
@@ -332,23 +468,52 @@ document.addEventListener("mousemove",e=>{
 });
 document.addEventListener("mouseup",()=>{dragging=false;});
 function resetView(){
-  let xs=DATA_A.map(p=>p[0]); if(DATA_B.length) xs=xs.concat(DATA_B.map(p=>p[0]));
-  view.x0=Math.min(...xs); view.x1=Math.max(...xs); render();
+  const extent=dataExtent();
+  if(!Number.isFinite(extent.x0) || !Number.isFinite(extent.x1)){ view.x0=0; view.x1=1; }
+  else { view.x0=extent.x0; view.x1=extent.x1; }
+  if (!(view.x1 > view.x0)) view.x1=view.x0+1;
+  render();
 }
 </script>
 </body>
 </html>"""
 
-    with open(out_file, "w") as f:
+    with open(out_file, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"[输出] HTML: {out_file}")
+    return True
 
 
-if __name__ == "__main__":
+def _positive_int(value):
+    """argparse 类型：只接受正整数。"""
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise ValueError("必须是正整数") from exc
+    if number <= 0:
+        raise ValueError("必须是正整数")
+    return number
+
+
+def _finite_float(value):
+    """argparse 类型：只接受有限浮点数。"""
+    try:
+        number = float(value)
+    except ValueError as exc:
+        raise ValueError("必须是有限浮点数") from exc
+    if not math.isfinite(number):
+        raise ValueError("必须是有限浮点数")
+    return number
+
+
+def main(argv=None):
+    """命令行入口，返回进程退出码。"""
+    argv = sys.argv[1:] if argv is None else argv
+
     # 无参数或帮助模式
-    if len(sys.argv) == 1 or '-h' in sys.argv:
+    if not argv or "-h" in argv:
         show_help()
-        sys.exit(0)
+        return 0
 
     import argparse
     import os
@@ -356,39 +521,72 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('-f', dest='input', action='append', help='输入: TS文件(可指定两个)')
     parser.add_argument('-o', dest='output', default='fingerprint_compare.svg', help='输出: 指纹图文件(.html交互/.svg静态)')
-    parser.add_argument('-n', dest='max_frames', type=int, default=None, help='配置: 最大帧数')
-    args = parser.parse_args()
+    parser.add_argument('-n', dest='max_frames', type=_positive_int, default=None, help='配置: 最大帧数(正整数)')
+    parser.add_argument('--shift-a-ms', type=_finite_float, default=0.0, help='配置: File A横向偏移，单位毫秒')
+    parser.add_argument('--shift-b-ms', type=_finite_float, default=0.0, help='配置: File B横向偏移，单位毫秒')
+    try:
+        args = parser.parse_args(argv)
+    except (SystemExit, ValueError):
+        show_help()
+        return 1
 
-    # 参数验证
     if not args.input:
         print("[错误] 缺少输入文件 (-f)")
         show_help()
-        sys.exit(1)
-    for f in args.input:
-        if not os.path.exists(f):
-            print(f"[错误] 文件不存在: {f}")
-            sys.exit(1)
+        return 1
     if len(args.input) > 2:
         print("[错误] 最多两个输入文件")
-        sys.exit(1)
+        return 1
+
+    output_lower = args.output.lower()
+    if not output_lower.endswith((".svg", ".html")):
+        print("[错误] 输出文件必须使用 .svg 或 .html 扩展名")
+        return 1
+    output_dir = os.path.dirname(os.path.abspath(args.output))
+    if not os.path.isdir(output_dir):
+        print(f"[错误] 输出目录不存在: {output_dir}")
+        return 1
+
+    input_paths = []
+    for file_path in args.input:
+        if not os.path.isfile(file_path):
+            print(f"[错误] 输入文件不存在或不是普通文件: {file_path}")
+            return 1
+        input_paths.append(os.path.realpath(file_path))
+    if os.path.realpath(os.path.abspath(args.output)) in input_paths:
+        print("[错误] 输出文件不能覆盖输入文件")
+        return 1
 
     rows_all = {}
-    for f in args.input:
-        print(f"[处理] {f}")
-        rows = fingerprints(f, args.max_frames)
-        print(f"  帧数={len(rows)}")
-        if rows:
+    try:
+        for file_path in args.input:
+            print(f"[处理] {file_path}")
+            rows = fingerprints(file_path, args.max_frames)
+            print(f"  帧数={len(rows)}")
             for i in range(1, len(rows)):
-                d = rows[i][0] - rows[i - 1][0]
-                if d > config["pts_jump_threshold"]:
-                    print(f"  PTS跳变 idx {rows[i-1][1]}->{rows[i][1]}: Δ{d} (={d/90:.0f} ms)")
-        rows_all[f] = rows
-        write_csv(f, rows)
+                delta = rows[i][0] - rows[i - 1][0]
+                if abs(delta) > config["pts_jump_threshold"]:
+                    print(
+                        f"  PTS跳变 idx {rows[i-1][1]}->{rows[i][1]}: "
+                        f"Δ{delta:.6f} s (={delta * 1000:.0f} ms)"
+                    )
+            rows_all[file_path] = rows
+            write_csv(file_path, rows)
 
-    if len(args.input) >= 1:
         a = rows_all[args.input[0]]
         b = rows_all[args.input[1]] if len(args.input) == 2 else []
-        if args.output.lower().endswith(".html"):
-            html_viewer(a, b, args.output)
+        if not a or (len(args.input) == 2 and not b):
+            print("[错误] 未提取到有效视频帧，未生成图表")
+            return 1
+        if output_lower.endswith(".html"):
+            generated = html_viewer(a, b, args.output, args.shift_a_ms, args.shift_b_ms)
         else:
-            svg_compare(a, b, args.output)
+            generated = svg_compare(a, b, args.output, args.shift_a_ms, args.shift_b_ms)
+        return 0 if generated else 1
+    except (ToolError, OSError, ValueError) as exc:
+        print(f"[错误] {exc}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

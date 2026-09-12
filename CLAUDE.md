@@ -16,6 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pcap_extractor.py` - 从PCAP文件提取UDP负载保存为TS（Scapy版本）
 - `pcap_extractor_v2.py` - 从PCAP文件提取UDP负载保存为TS（标准库版本，更快且无依赖，优先使用）
   两者命令行参数一致：按源/目的 IP 与端口过滤（逗号分隔列表），输出做 TS 188 字节对齐自检
+- `frame_fingerprint.py` - 逐帧计算 TS 视频的 dHash 与亮度指纹，生成 SVG 或可交互 HTML 对比图
 
 ### 系统运维工具 (sysadmin_tools/)
 - `sysinfo_checker.py` - 综合系统信息检查，收集OS、CPU、内存、磁盘、网卡、GPU、进程等状态，输出JSON文件
@@ -31,8 +32,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Dependencies
 
+最低 Python 版本要求：Python 3.6。
+
 Python脚本依赖：
 - `scapy` - 网络包处理（multi_cap_parser.py, udp_sender.py PCAP模式, pcap_extractor.py）
+- `ffmpeg`, `ffprobe` - 视频解码与逐帧时间戳读取（frame_fingerprint.py）
 - `opencv-python`, `numpy` - 图像处理（image_measurer.py）
 
 Shell脚本依赖：
@@ -56,6 +60,9 @@ python3 udp_sender.py -f input.pcap -i 192.165.56.184 -p 13000 --preserve-timing
 
 # PCAP提取UDP负载
 python3 pcap_extractor.py -i input.pcap -o output.ts
+
+# TS逐帧指纹对比
+python3 network_tools/frame_fingerprint.py -f a.ts -f b.ts -o compare.html
 
 # 系统信息检查
 python3 sysinfo_checker.py

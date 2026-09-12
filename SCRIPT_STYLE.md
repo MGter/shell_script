@@ -208,6 +208,12 @@ if not os.path.exists(args.input):
 | | `--dport <端口列表>` | port列表 | 过滤: 仅目的端口 |
 | | `--no-ts-check` | flag | 配置: 关闭TS 188字节对齐自检 |
 | | `-h` | flag | 显示帮助 |
+| `frame_fingerprint.py` | `-f <文件>` | filepath(.ts) | 输入: TS视频文件，可重复指定一个或两个 (必选) |
+| | `-o <文件>` | filepath(.svg/.html) | 输出: 指纹图文件 (默认: fingerprint_compare.svg) |
+| | `-n <帧数>` | integer(正整数) | 配置: 最多处理前N帧 (默认: 全部) |
+| | `--shift-a-ms <毫秒>` | float | 配置: File A横向时间偏移 (默认: 0) |
+| | `--shift-b-ms <毫秒>` | float | 配置: File B横向时间偏移 (默认: 0) |
+| | `-h` | flag | 显示帮助 |
 | `set_policy_routing.py` | `<网卡>` | interface | 目标: 配置源策略路由的网卡 |
 | | `[表ID]` | integer(1-252) | 配置: 策略路由表 ID (默认: 203) |
 | | `-h` | flag | 显示帮助 |
