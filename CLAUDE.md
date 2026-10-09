@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### 网络测试工具 (network_tools/)
 - `set_policy_routing.py` - IPv4源策略路由设置，按网卡源地址配置专用路由表
 - `ffmpeg_push.sh` - ffmpeg多端口UDP推流，支持循环推流和端口递增
+- `ffmpeg_push.py` - ffmpeg多端口UDP推流(Python版)，参数兼容ffmpeg_push.sh，额外支持状态查看、日志跟踪、残留进程清理、Windows
 - `udp_sender.py` - UDP发送工具，支持TS流按码率发送和PCAP回放
 - `multi_cap_parser.py` - 多端口并行抓包+TS流时间戳解析对比
 - `pcap_extractor.py` - 从PCAP文件提取UDP负载保存为TS（Scapy版本）
@@ -51,6 +52,11 @@ sudo python3 network_tools/set_policy_routing.py enp8s0 203
 
 # ffmpeg多端口推流
 ffmpeg_push.sh -f input.ts -i 127.0.0.1 -p 30000 -n 5
+
+# ffmpeg多端口推流(Python版，支持状态/日志/Windows)
+python3 network_tools/ffmpeg_push.py -f input.ts -i 127.0.0.1 -p 30000 -n 5
+python3 network_tools/ffmpeg_push.py --status
+python3 network_tools/ffmpeg_push.py -s
 
 # TS流按码率发送
 python3 udp_sender.py -f input.ts -i 127.0.0.1 -p 25234 -b 16600000

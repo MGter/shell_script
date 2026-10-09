@@ -174,6 +174,21 @@ if not os.path.exists(args.input):
 | | `-n <次数>` | integer | 推流数量(端口递增) |
 | | `-s` | flag | 停止所有推流 |
 | | `-h` | flag | 显示帮助 |
+| `ffmpeg_push.py` | `-f <文件>` | filepath(.ts) | 输入: TS流文件路径 (必选) |
+| | `-i <IP>` | ipv4 | 目标: 推流IP地址 (必选) |
+| | `-p <端口>` | port | 目标: 推流起始端口 (必选) |
+| | `-n <次数>` | integer | 配置: 推流数量(端口递增) (默认: 1) |
+| | `--local-ip <IP>` | ipv4 | 配置: 本机发送地址 -localaddr (默认: 不绑定) |
+| | `-s` | flag | 操作: 停止所有推流 |
+| | `--status` | flag | 操作: 查看推流状态 |
+| | `--logs` | flag | 操作: 查看日志 |
+| | `--follow` | flag | 配置: 日志实时跟踪 |
+| | `--name <名字>` | string | 配置: 只查看指定任务 |
+| | `--lines <行数>` | integer | 配置: 日志显示行数 (默认: 30) |
+| | `--dry-run` | flag | 配置: 只打印命令，不启动 |
+| | `--force` | flag | 配置: 已在运行时也重新启动 |
+| | `--foreground` | flag | 配置: 前台运行，Ctrl+C 停止 |
+| | `-h` | flag | 显示帮助 |
 | `multi_cap_parser.py` | `-i <IP>` | ipv4 | 目标: 抓包目标IP |
 | | `-p <端口>` | port列表 | 目标: 抓包端口(逗号分隔) |
 | | `-d <时长>` | integer | 抓包时长(秒) |
